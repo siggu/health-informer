@@ -92,6 +92,9 @@ class LLMStructuredCrawler(BaseCrawler):
     ) -> str:
         """
         HTML에서 주요 텍스트 내용 추출 (내부 헬퍼)
+        - 불필요한 요소(nav, footer, sidebar 등) 제거
+        - 메인 콘텐츠 영역 우선 추출
+        - 테이블 데이터 구조화
 
         Args:
             soup: BeautifulSoup 객체
@@ -100,14 +103,106 @@ class LLMStructuredCrawler(BaseCrawler):
         Returns:
             추출된 텍스트 (길이 제한 적용)
         """
-        # 텍스트 추출
-        text = soup.get_text(separator="\n", strip=True)
+        # 복사본 생성 (원본 soup 수정 방지)
+        soup_copy = BeautifulSoup(str(soup), "html.parser")
+
+        # 1️⃣ 불필요한 요소 제거
+        unwanted_selectors = [
+            "nav",
+            "header",
+            "footer",
+            ".sidebar",
+            ".menu",
+            ".navigation",
+            "#nav",
+            "#header",
+            "#footer",
+            ".ad",
+            ".advertisement",
+            "script",
+            "style",
+            "noscript",
+            ".cookie-banner",
+            ".popup",
+        ]
+
+        for selector in unwanted_selectors:
+            for element in soup_copy.select(selector):
+                element.decompose()
+
+        # 2️⃣ 메인 콘텐츠 영역 찾기
+        main_content_selectors = [
+            "main",
+            "#content",
+            "#main",
+            ".content",
+            ".main-content",
+            ".contentArea",
+            ".content-area",
+            "article",
+            ".article",
+            "[role='main']",
+        ]
+
+        content_area = None
+        for selector in main_content_selectors:
+            content_area = soup_copy.select_one(selector)
+            if content_area:
+                break
+
+        # 메인 콘텐츠가 없으면 body 전체 사용
+        if not content_area:
+            content_area = soup_copy.find("body") or soup_copy
+
+        # 3️⃣ 테이블 데이터 구조화
+        text_parts = []
+
+        # 테이블 처리
+        for table in content_area.find_all("table"):
+            table_lines = ["[표 시작]"]
+
+            # 테이블 헤더
+            headers = []
+            for th in table.find_all("th"):
+                th_text = th.get_text(strip=True)
+                if th_text:
+                    headers.append(th_text)
+
+            if headers:
+                table_lines.append(" | ".join(headers))
+                table_lines.append("-" * (len(" | ".join(headers))))
+
+            # 테이블 행
+            for row in table.find_all("tr"):
+                cells = []
+                for cell in row.find_all(["td", "th"]):
+                    cell_text = cell.get_text(strip=True)
+                    if cell_text:
+                        cells.append(cell_text)
+
+                if cells:
+                    table_lines.append(" | ".join(cells))
+
+            table_lines.append("[표 끝]\n")
+
+            # 테이블을 문자열로 변환하고 원본에서 제거
+            text_parts.append("\n".join(table_lines))
+            table.decompose()
+
+        # 4️⃣ 일반 텍스트 추출 (테이블은 이미 제거됨)
+        text = content_area.get_text(separator="\n", strip=True)
 
         # 빈 줄 제거 및 정리
         lines = [line.strip() for line in text.split("\n") if line.strip()]
-        cleaned_text = "\n".join(lines)
+        general_text = "\n".join(lines)
 
-        # 길이 제한 적용
+        # 5️⃣ 테이블 텍스트와 일반 텍스트 결합
+        if text_parts:
+            cleaned_text = general_text + "\n\n" + "\n\n".join(text_parts)
+        else:
+            cleaned_text = general_text
+
+        # 6️⃣ 길이 제한 적용
         if len(cleaned_text) > max_chars:
             print(
                 f"    ⚠️ 텍스트가 너무 깁니다 ({len(cleaned_text):,}자). {max_chars:,}자로 잘라냅니다."
