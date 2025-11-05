@@ -53,6 +53,9 @@ class DistrictCrawler(BaseCrawler):
         # 출력 디렉토리 생성
         os.makedirs(output_dir, exist_ok=True)
 
+        # 탭 제외 로그 중복 방지용 (URL 기준으로 추적)
+        self.excluded_tab_urls = set()
+
     def run(
         self,
         start_url: str,
@@ -275,11 +278,15 @@ class DistrictCrawler(BaseCrawler):
             추가된 탭 링크 수
         """
         newly_added_count = 0
+        excluded_count = 0
 
         for tab_link_info in tab_links:
-            # 중복 체크
+            tab_url = tab_link_info["url"]
+            tab_name = tab_link_info["name"]
+
+            # 중복 체크 (이미 처리되었거나 큐에 있음)
             is_already_processed = any(
-                utils.are_urls_equivalent(existing_url, tab_link_info["url"])
+                utils.are_urls_equivalent(existing_url, tab_url)
                 for existing_url in processed_or_queued_urls
             )
 
@@ -289,23 +296,27 @@ class DistrictCrawler(BaseCrawler):
             # 키워드 필터링 체크
             if enable_keyword_filter and config.KEYWORD_FILTER["mode"] != "none":
                 passed, reason = self.link_filter.check_keyword_filter(
-                    tab_link_info["name"],
+                    tab_name,
                     whitelist=config.KEYWORD_FILTER.get("whitelist"),
                     blacklist=config.KEYWORD_FILTER.get("blacklist"),
                     mode=config.KEYWORD_FILTER["mode"],
                 )
 
                 if not passed:
-                    print(f"      ✗ [탭 제외] {tab_link_info['name']} - {reason}")
+                    # 같은 URL의 제외 로그는 한 번만 출력 (중복 방지)
+                    if tab_url not in self.excluded_tab_urls:
+                        self.excluded_tab_urls.add(tab_url)
+                        print(
+                            f"      ✗ [같은 화면의 다른 탭 제외] {tab_name} - {reason}"
+                        )
+                    excluded_count += 1
                     continue
 
             # 큐에 추가
             links_to_process.append(tab_link_info)
-            processed_or_queued_urls.append(tab_link_info["url"])
+            processed_or_queued_urls.append(tab_url)
             newly_added_count += 1
-            print(
-                f"      + 탭 링크 추가: {tab_link_info['name']} ({tab_link_info['url']})"
-            )
+            print(f"      + 탭 링크 추가: {tab_name} ({tab_url})")
 
         if newly_added_count > 0:
             print(
