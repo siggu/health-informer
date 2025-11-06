@@ -1,4 +1,5 @@
 """세션 관리 유틸리티 - 로그인 상태 영구 저장"""
+
 import json
 import os
 from pathlib import Path
@@ -16,12 +17,8 @@ def get_session_file_path() -> Path:
 def save_session(user_id: str, user_info: Dict[str, Any]):
     """로그인 세션을 파일에 저장"""
     session_file = get_session_file_path()
-    session_data = {
-        "user_id": user_id,
-        "user_info": user_info,
-        "is_logged_in": True
-    }
-    
+    session_data = {"user_id": user_id, "user_info": user_info, "is_logged_in": True}
+
     try:
         with open(session_file, "w", encoding="utf-8") as f:
             json.dump(session_data, f, ensure_ascii=False, indent=2, default=str)
@@ -32,10 +29,10 @@ def save_session(user_id: str, user_info: Dict[str, Any]):
 def load_session() -> Optional[Dict[str, Any]]:
     """저장된 세션을 파일에서 로드"""
     session_file = get_session_file_path()
-    
+
     if not session_file.exists():
         return None
-    
+
     try:
         with open(session_file, "r", encoding="utf-8") as f:
             session_data = json.load(f)
@@ -53,6 +50,3 @@ def clear_session():
             session_file.unlink()
     except Exception as e:
         print(f"세션 삭제 실패: {e}")
-
-
-

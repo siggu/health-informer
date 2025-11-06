@@ -70,13 +70,23 @@ if "profiles" not in st.session_state:
             "isActive": True,
         }
     ]
+# ================세션 초기화 기본 문법=============================
+# # Initialization
+# if 'key' not in st.session_state:
+#     st.session_state['key'] = 'value'
+
+# # Session State also supports attribute based syntax
+# if 'key' not in st.session_state:
+#     st.session_state.key = 'value'
+# =============================================================
+
 
 # 마이페이지 / 설정 모달 관련 상태
-if "isAddingProfile" not in st.session_state:
+if "isAddingProfile" not in st.session_state:  # 프로필 추가 열렸는지 확인
     st.session_state.isAddingProfile = False
-if "editingProfileId" not in st.session_state:
+if "editingProfileId" not in st.session_state:  # 프로필 수정 상태 초기화
     st.session_state.editingProfileId = None
-if "newProfile" not in st.session_state:
+if "newProfile" not in st.session_state:  # 프로필 추가 세션
     st.session_state.newProfile = DEFAULT_NEW_PROFILE.copy()
 if "editingData" not in st.session_state:
     st.session_state.editingData = {}
@@ -102,11 +112,12 @@ if "password_error" not in st.session_state:
     st.session_state.password_error = ""
 
 # 사이드바/챗봇 관련 상태
+# 대화 내용 검색 필드의 초기값 설정
 if "search_query" not in st.session_state:
     st.session_state.search_query = ""
 
-# 추가
-# 안전: 사이드바 입력 키 초기화
+
+# 사이드바 검색 입력 필드의 초기값 설정.
 if "sidebar_search_input" not in st.session_state:
     st.session_state.sidebar_search_input = ""
 

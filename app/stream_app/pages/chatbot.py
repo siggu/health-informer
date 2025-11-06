@@ -52,7 +52,7 @@ def handle_send_logic(prompt: str):
                 "description": "만 19세~34세 청년의 주거비 부담을 덜어주기 위한 월세 지원 정책입니다.",
                 "eligibility": "만 19~34세, 소득 기준 충족, 서울시 거주",
                 "benefits": "월 최대 20만원 지원 (최대 12개월)",
-                "applicationUrl": "https://example.com/apply",
+                "applicationUrl": "https://housing.seoul.go.kr/site/main/content/sh01_060513",
                 "isEligible": True,
             }
         ],
