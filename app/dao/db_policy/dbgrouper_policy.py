@@ -85,9 +85,9 @@ def assign_policy_ids(
 ):
     """
     - '새 base'와의 유사도(sim_new)가 threshold 이상이고 기존 정책 sim_old보다 클 경우 policy_id 교체.
-    - 임베딩 테이블/컬럼명은 전역 _EMB_TABLE, _EMB_COL 사용(ArgumentParser에서 세팅됨).
+    - 기본은 더 높은 weight만 대상으로 그룹핑하지만,
+      **상위 weight 문서가 하나도 없으면 동일 weight에서도 그룹핑(>=) 허용**.
     """
-
 
     load_dotenv()
     if os.getenv("RESET_ALL_POLICY_IDS_ON_START", "").lower() in ("1", "true", "t", "yes", "y"):
@@ -127,6 +127,7 @@ def assign_policy_ids(
             cur.execute("SELECT COUNT(*) FROM documents WHERE policy_id IS NULL")
             null_policies = cur.fetchone()[0]
 
+            # 상위 weight 존재 여부 점검
             cur.execute("""
                 SELECT COUNT(*)
                 FROM documents d_low
@@ -134,14 +135,17 @@ def assign_policy_ids(
             """)
             comparable_pairs = cur.fetchone()[0]
 
+        # 상위 weight가 하나도 없으면 동일 weight도 허용(>=), 있으면 기본(>)
+        weight_op = ">=" if comparable_pairs == 0 else ">"
         if verbose:
             print(f"[CHECK] 제목임베딩 존재 문서수: {docs_with_title}")
             print(f"[CHECK] policy_id NULL 문서수: {null_policies}")
-            print(f"[CHECK] weight 방향 조건 충족 가능한 페어수(rough): {comparable_pairs}")
+            print(f"[CHECK] '상위 weight' 가능한 페어수: {comparable_pairs}")
+            print(f"[MODE]  그룹핑 weight 조건: t.weight {weight_op} base_weight")
             if docs_with_title == 0:
-                print(f"[HINT] 임베딩 field가 '{title_field}'가 맞는지, 테이블/컬럼명({_EMB_TABLE}/{_EMB_COL})을 확인하세요.")
+                print(f"[HINT] 임베딩 field가 '{title_field}'가 맞는지, 테이블/컬럼명({_EMB_TABLE}/{_EMB_COL}) 확인")
 
-        # base 후보(=하위 weight) 가져오기: 더 이상 policy_id NULL로 제한하지 않음
+        # base 후보(=낮은 weight부터)
         with conn.cursor() as cur:
             cur.execute(
                 f"""
@@ -169,13 +173,13 @@ def assign_policy_ids(
             for base_id, base_weight in batch:
                 with conn.cursor() as cur:
                     if dry_run:
-                        # 교체/할당 가능한 대상 수만 카운트
+                        # 카운트만: weight 비교 연산자를 동적으로 주입
                         count_sql = f"""
                             WITH base AS (
                                 SELECT d.id AS base_id, e.{emb_col} AS base_emb
                                 FROM documents d
                                 JOIN {emb_table} e
-                                ON e.doc_id::bigint = d.id AND e.field = %s
+                                  ON e.doc_id::bigint = d.id AND e.field = %s
                                 WHERE d.id = %s
                             ),
                             cand AS (
@@ -184,9 +188,8 @@ def assign_policy_ids(
                                     et.{emb_col} AS tgt_emb
                                 FROM documents t
                                 JOIN {emb_table} et
-                                ON et.doc_id::bigint = t.id AND et.field = %s
-                                WHERE t.weight > %s
-                                -- dry-run에서는 굳이 FOR UPDATE 필요 없음(계산만)
+                                  ON et.doc_id::bigint = t.id AND et.field = %s
+                                WHERE t.weight {weight_op} %s
                             ),
                             sims AS (
                                 SELECT
@@ -204,14 +207,14 @@ def assign_policy_ids(
                                     WHERE e.doc_id::bigint = (
                                         SELECT policy_id FROM documents WHERE id = c.target_id
                                     )
-                                    AND e.field = %s
+                                      AND e.field = %s
                                     LIMIT 1
                                 ) pol ON TRUE
                             )
                             SELECT COUNT(*)
                             FROM sims
                             WHERE sim_new >= %s
-                            AND (sim_old IS NULL OR sim_new > sim_old)
+                              AND (sim_old IS NULL OR sim_new > sim_old)
                         """
                         cur.execute(
                             count_sql,
@@ -225,30 +228,29 @@ def assign_policy_ids(
                             ),
                         )
                         cnt = cur.fetchone()[0]
-                                                
+                        if verbose:
+                            print(f"  [DRY] base={base_id}, base_w={base_weight} → 후보 {cnt}건")
+
                     else:
-                        # 실제 업데이트: sim_new >= threshold AND sim_new > sim_old일 때 교체(또는 신규 할당)
-                        
+                        # 실제 업데이트: weight 비교 연산자 동적 적용
                         update_sql = f"""
                             WITH base AS (
                                 SELECT d.id AS base_id, e.{emb_col} AS base_emb
                                 FROM documents d
                                 JOIN {emb_table} e
-                                ON e.doc_id::bigint = d.id AND e.field = %s
+                                  ON e.doc_id::bigint = d.id AND e.field = %s
                                 WHERE d.id = %s
                             ),
-                            -- 대상 후보를 먼저 잠금: 오직 documents t에만 락
                             cand AS (
                                 SELECT
                                     t.id AS target_id,
                                     et.{emb_col} AS tgt_emb
                                 FROM documents t
                                 JOIN {emb_table} et
-                                ON et.doc_id::bigint = t.id AND et.field = %s
-                                WHERE t.weight > %s
+                                  ON et.doc_id::bigint = t.id AND et.field = %s
+                                WHERE t.weight {weight_op} %s
                                 FOR UPDATE OF t SKIP LOCKED
                             ),
-                            -- 기존 policy 임베딩은 LATERAL로 별도 조회 (잠금 대상 아님)
                             sims AS (
                                 SELECT
                                     c.target_id,
@@ -265,16 +267,16 @@ def assign_policy_ids(
                                     WHERE e.doc_id::bigint = (
                                         SELECT policy_id FROM documents WHERE id = c.target_id
                                     )
-                                    AND e.field = %s
+                                      AND e.field = %s
                                     LIMIT 1
                                 ) pol ON TRUE
                             )
                             UPDATE documents t
-                            SET policy_id = (SELECT base_id FROM base)
-                            FROM sims
-                            WHERE t.id = sims.target_id
-                            AND sims.sim_new >= %s
-                            AND (sims.sim_old IS NULL OR sims.sim_new > sims.sim_old)
+                               SET policy_id = (SELECT base_id FROM base)
+                              FROM sims
+                             WHERE t.id = sims.target_id
+                               AND sims.sim_new >= %s
+                               AND (sims.sim_old IS NULL OR sims.sim_new > sims.sim_old)
                             RETURNING t.id
                         """
                         cur.execute(
@@ -288,7 +290,6 @@ def assign_policy_ids(
                                 similarity_threshold,
                             ),
                         )
-
                         updated = cur.fetchall()
                         total_updates += len(updated)
 
@@ -306,6 +307,7 @@ def assign_policy_ids(
             "batch_size": batch_size,
             "dry_run": dry_run,
             "reset_all_on_start": reset_all_on_start,
+            "weight_compare_op": weight_op,
         }
 
     except Exception as e:
