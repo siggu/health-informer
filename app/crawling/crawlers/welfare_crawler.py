@@ -27,7 +27,7 @@ from components.link_filter import LinkFilter
 class WelfareCrawler(BaseCrawler):
     """서울시 복지포털 전용 크롤러"""
 
-    def __init__(self, output_dir: str = "app/interface/crawling/output"):
+    def __init__(self, output_dir: str = "app/crawling/output"):
         """
         Args:
             output_dir: 결과 저장 디렉토리
@@ -300,14 +300,6 @@ class WelfareCrawler(BaseCrawler):
             output_path = os.path.join(self.output_dir, output_filename)
             with open(output_path, "w", encoding="utf-8") as f:
                 json.dump(all_results, f, ensure_ascii=False, indent=2)
-        output_path = None
-        if save_json:
-            if output_filename is None:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                output_filename = f"welfare_structured_data_{timestamp}.json"
-            output_path = os.path.join(self.output_dir, output_filename)
-            with open(output_path, "w", encoding="utf-8") as f:
-                json.dump(all_results, f, ensure_ascii=False, indent=2)
 
         # 결과 요약
         print("\n" + "=" * 80)
@@ -320,13 +312,10 @@ class WelfareCrawler(BaseCrawler):
         print(f"✗ 실패: {fail_count}개")
         if save_json:
             print(f"✓ 결과 파일: {output_path}")
-        if return_data:
-            return all_results
-        if save_json:
-            print(f"✓ 결과 파일: {output_path}")
-        if return_data:
-            return all_results
         print("=" * 80)
+
+        if return_data:
+            return all_results
 
 
 def main():
@@ -352,8 +341,6 @@ def main():
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="app/crawling/output",
-        help="출력 디렉토리 (기본값: app/crawling/output)",
         default="app/crawling/output",
         help="출력 디렉토리 (기본값: app/crawling/output)",
     )
