@@ -58,3 +58,18 @@ widgets 폴더
 - Streamlit 위젯은 `app/stream_app/src/widgets/` 에서 관리
 - HTML 템플릿은 `app/stream_app/templates/` 에서 관리
 - CSS 스타일은 `app/stream_app/styles/` 에서 관리
+
+### 2. 모듈 구조 (분리된 페이지/로직)
+- 진입점: `app/stream_app/app.py` (라우팅/초기화/전역상태 최소 유지)
+- 인증: `app/stream_app/src/pages/auth.py` (로그인/회원가입 UI 및 상태)
+- 마이페이지: `app/stream_app/src/pages/my_page.py` (프로필 조회/편집/추가/삭제)
+- 설정: `app/stream_app/src/pages/settings.py` (비밀번호 변경/알림/회원탈퇴)
+- 챗봇: `app/stream_app/src/pages/chat.py` (채팅 렌더링/메시지 전송/정책 카드 파싱)
+- LLM 매니저: `app/stream_app/src/llm_manager.py` (ChatOpenAI 초기화 및 응답/스트리밍)
+
+### 3. 실행 흐름 요약
+1) 앱 시작 시 `app.py`에서 세션/인증 상태를 초기화하고 저장된 세션을 복원
+2) 비로그인: `render_auth_modal()`
+3) 로그인: 사이드바 + (설정/마이페이지 모달 중 하나) 또는 기본 `render_chatbot_main()`
+4) 메시지 전송은 `pages/chat.py`의 `handle_send_message`가 담당, LLM 스트리밍 사용
+5) 정책 JSON 코드블록을 파싱해 정책 카드를 렌더링

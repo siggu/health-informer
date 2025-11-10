@@ -102,12 +102,13 @@ def update_login_status(is_logged_in: bool = False):
         return False
 
 
-# def clear_session():
-#     """세션 파일 삭제"""
-#     session_file = get_session_file_path()
-#     try:
-#         if session_file.exists():
-#             session_file.unlink()
-#     except Exception as e:
-#         print(f"세션 삭제 실패: {e}")
+def clear_session():
+    """세션 파일 삭제"""
+    session_file = get_session_file_path()
+    try:
+        if session_file.exists():
+            session_file.unlink()
+            logger.info("세션 파일 삭제 완료")
+    except Exception as e:
+        logger.error(f"세션 삭제 실패: {e}")
 

@@ -1,6 +1,7 @@
-import streamlit as st
 import datetime
 from typing import Dict, Any
+import streamlit as st
+
 from src.backend_service import (
     api_login,
     api_signup,
@@ -9,7 +10,7 @@ from src.backend_service import (
 )
 from src.utils.session_manager import save_session
 
-# 옵션 데이터
+
 GENDER_OPTIONS = ["남성", "여성"]
 HEALTH_INSURANCE_OPTIONS = ["직장", "지역", "피부양", "의료급여"]
 BASIC_LIVELIHOOD_OPTIONS = ["없음", "생계", "의료", "주거", "교육"]
@@ -35,29 +36,13 @@ def initialize_auth_state():
             "incomeLevel": "",
             "basicLivelihood": BASIC_LIVELIHOOD_OPTIONS[0],
         },
-        "user_info": {},  # 사용자 정보 저장용 추가
+        "user_info": {},
         "is_id_available": None,
         "is_checking_id": False,
     }
-
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
-
-
-def render_chatbot_page():
-    """챗봇 페이지를 렌더링하는 함수"""
-    st.title("정책 추천 챗봇")
-    st.write("나이, 거주지, 관심 분야를 알려주시면 맞춤형 정책을 추천해드립니다.")
-
-    # 사용자 입력을 받는 부분
-    age = st.number_input("나이를 입력하세요:", min_value=0, max_value=120)
-    location = st.text_input("거주지를 입력하세요:")
-    # interests = st.text_input("관심 분야를 입력하세요:")
-
-    if st.button("추천 받기"):
-        # 여기서 정책 추천 로직을 추가할 수 있습니다.
-        st.success(f"{age}세, {location}에 사는 분을 위한 맞춤형 정책을 추천합니다.")
 
 
 def render_login_tab():
@@ -69,14 +54,11 @@ def render_login_tab():
         st.text_input(
             "비밀번호", type="password", value=data["password"], key="login_pw_input"
         )
-
         if error_msg:
             st.error(error_msg)
-
         submitted = st.form_submit_button("로그인", use_container_width=True)
 
     if submitted:
-        # 폼 제출 후 처리 (콜백 없음)
         data["userId"] = st.session_state.get("login_id_input", "").strip()
         data["password"] = st.session_state.get("login_pw_input", "")
         if not data["userId"] or not data["password"]:
@@ -90,19 +72,14 @@ def render_login_tab():
             st.session_state["is_logged_in"] = True
             st.session_state["show_login_modal"] = False
             st.session_state["auth_error"]["login"] = ""
-            # 사용자 정보/프로필 불러오기
             ok, user_info = api_get_user_info(data["userId"])
             if ok:
                 st.session_state["user_info"] = user_info
-                # profiles.json 스키마를 Streamlit 내부 프로필 리스트로 매핑
                 profile = user_info.get("profile", {}) or {}
-                # 세션 프로필을 단일 활성 프로필로 업데이트
                 st.session_state["profiles"] = [
                     {
                         "id": data["userId"],
-                        "name": user_info.get("profile", {}).get(
-                            "name", ""
-                        ),  # 없으면 빈값
+                        "name": user_info.get("profile", {}).get("name", ""),
                         "birthDate": profile.get("birthDate", ""),
                         "gender": profile.get("gender", ""),
                         "location": profile.get("location", ""),
@@ -116,9 +93,7 @@ def render_login_tab():
                     }
                 ]
             else:
-                # 최소한 userId만 저장
                 st.session_state["user_info"] = {"userId": data["userId"]}
-            # 로그인 세션 저장 (user_info 포함)
             save_session(
                 data["userId"],
                 st.session_state.get("user_info", {"userId": data["userId"]}),
@@ -128,16 +103,11 @@ def render_login_tab():
         st.rerun()
 
 
-def handle_signup_submit(signup_data):
-    """회원가입 처리 및 사용자 정보 저장"""
+def handle_signup_submit(signup_data: Dict[str, Any]):
     if not signup_data.get("userId") or not signup_data.get("password"):
         return False, "필수 정보를 입력해주세요."
-
-    # 회원가입 API 호출
     success, message = api_signup(signup_data["userId"], signup_data)
-
     if success:
-        # 회원가입 성공 시 사용자 정보 저장
         user_info = {
             "userId": signup_data["userId"],
             "name": signup_data.get("name", ""),
@@ -151,18 +121,14 @@ def handle_signup_submit(signup_data):
         st.session_state["user_info"] = user_info
         st.session_state["is_logged_in"] = True
         st.session_state["show_login_modal"] = False
-        # 회원가입 후 자동 로그인 세션 저장
         save_session(signup_data["userId"], user_info)
-
     return success, message
 
 
 def render_signup_tab():
-    """회원가입 탭 렌더링 (두 번째 사진 참고 - 모든 필드 표시)"""
     sdata = st.session_state["signup_form_data"]
     err = st.session_state["auth_error"].get("signup", "")
 
-    # 아이디 중복 확인 (폼 밖에서 처리)
     col_id, col_check = st.columns([7, 3])
     with col_id:
         user_id = st.text_input(
@@ -172,7 +138,7 @@ def render_signup_tab():
             placeholder="아이디를 입력하세요",
         )
     with col_check:
-        st.markdown("<br>", unsafe_allow_html=True)  # 버튼 정렬을 위한 공백
+        st.markdown("<br>", unsafe_allow_html=True)
         if st.button("중복 확인", key="btn_check_id", use_container_width=True):
             if user_id:
                 is_available, msg = api_check_id_availability(user_id)
@@ -184,8 +150,6 @@ def render_signup_tab():
                     st.error(msg)
 
     with st.form("signup_form"):
-
-        # 비밀번호
         st.text_input(
             "비밀번호 *",
             type="password",
@@ -194,8 +158,6 @@ def render_signup_tab():
             placeholder="8자 이상 입력하세요",
             help="비밀번호는 8자 이상이어야 합니다.",
         )
-
-        # 비밀번호 확인
         st.text_input(
             "비밀번호 확인 *",
             type="password",
@@ -203,8 +165,6 @@ def render_signup_tab():
             key="signup_pw_confirm",
             placeholder="비밀번호를 다시 입력하세요",
         )
-
-        # 이름
         st.text_input(
             "이름 *",
             value=sdata.get("name", ""),
@@ -212,7 +172,6 @@ def render_signup_tab():
             placeholder="이름을 입력하세요",
         )
 
-        # 생년월일
         min_date = datetime.date(1923, 1, 1)
         max_date = datetime.date.today()
         default_date = datetime.date(1990, 1, 1)
@@ -224,10 +183,7 @@ def render_signup_tab():
             key="signup_birthdate",
             format="YYYY-MM-DD",
         )
-        # 선택: 나이(생년월일 제공 안할 경우 보조로 사용)
-        # st.number_input("나이(선택)", min_value = 0, max_value = 120, key= "signup_age", value = 0)
 
-        # 성별
         st.selectbox(
             "성별 *",
             options=GENDER_OPTIONS,
@@ -239,24 +195,18 @@ def render_signup_tab():
             key="signup_gender",
             placeholder="선택하세요",
         )
-
-        # 거주지
         st.text_input(
             "거주지 (시군구) *",
             value=sdata.get("location", ""),
             key="signup_location",
             placeholder="예: 서울시 강남구",
         )
-
-        # 건강보험 자격
         st.selectbox(
             "건강보험 자격 *",
             options=HEALTH_INSURANCE_OPTIONS,
             key="signup_health",
             placeholder="선택하세요",
         )
-
-        # 중위소득 대비 소득수준
         st.text_input(
             "중위소득 대비 소득수준 (%) *",
             value=sdata.get("incomeLevel", ""),
@@ -264,8 +214,6 @@ def render_signup_tab():
             placeholder="예: 50, 100, 150",
             help="중위소득 대비 소득 수준을 백분율로 입력하세요",
         )
-
-        # 기초생활보장 급여
         st.selectbox(
             "기초생활보장 급여 *",
             options=BASIC_LIVELIHOOD_OPTIONS,
@@ -273,7 +221,6 @@ def render_signup_tab():
             placeholder="선택하세요",
         )
 
-        # 장애 등급
         disability_map = {"미등록": "0", "심한 장애": "1", "심하지 않은 장애": "2"}
         disability_options = list(disability_map.keys())
         selected_disability = st.selectbox(
@@ -283,7 +230,6 @@ def render_signup_tab():
             placeholder="선택하세요",
         )
 
-        # 장기요양 등급
         longterm_map = {
             "해당없음": "NONE",
             "1등급": "G1",
@@ -301,7 +247,6 @@ def render_signup_tab():
             placeholder="선택하세요",
         )
 
-        # 임신·출산 여부
         pregnancy_options = ["없음", "임신중", "출산후12개월이내"]
         st.selectbox(
             "임신·출산 여부 *",
@@ -316,12 +261,8 @@ def render_signup_tab():
         submitted = st.form_submit_button(
             "회원가입", use_container_width=True, type="primary"
         )
-
         if submitted:
-            # 아이디는 폼 밖에 있으므로 session_state에서 가져오기
             user_id_value = st.session_state.get("signup_userid", "")
-
-            # 폼 데이터 수집
             signup_data = {
                 "userId": user_id_value,
                 "password": st.session_state.signup_pw,
@@ -329,9 +270,6 @@ def render_signup_tab():
                 "name": st.session_state.get("signup_name", ""),
                 "gender": st.session_state.signup_gender,
                 "birthDate": st.session_state.signup_birthdate,
-                # "birthDate": st.session_state.signup_birthdate.isoformat() if isinstance(st.session_state.signup_birthdate, datetime.date) else str(st.session_state.signup_birthdate),
-                # # age는 birthDate가 명확하지 않을 때 보수적으로 사용 가능
-                # **({"age": st.session_state.signup_age} if st.session_state.get("signup_age", 0) else {}),
                 "location": st.session_state.signup_location,
                 "healthInsurance": st.session_state.signup_health,
                 "incomeLevel": st.session_state.signup_income,
@@ -340,8 +278,6 @@ def render_signup_tab():
                 "longTermCare": longterm_map.get(selected_longterm, "NONE"),
                 "pregnancyStatus": st.session_state.signup_pregnancy,
             }
-
-            # 회원가입 처리
             success, message = handle_signup_submit(signup_data)
             if success:
                 st.success(message)
@@ -352,21 +288,12 @@ def render_signup_tab():
 
 
 def render_auth_modal(show_header: bool = True):
-    """
-    로그인/회원가입 UI를 렌더. show_header=False로 호출하면
-    SIMPLECIRCLE 등의 상단 문구(모달 스타일 설명)를 숨김.
-    """
     initialize_auth_state()
-
     if show_header:
         st.markdown("### SIMPLECIRCLE")
         st.markdown("로그인하거나 새 계정을 만드세요")
-
     login_tab, signup_tab = st.tabs(["로그인", "회원가입"])
     with login_tab:
         render_login_tab()
     with signup_tab:
         render_signup_tab()
-
-
-# st.tabs는 클릭할 때마다 해당 탭의 컨테이너를 재실행하므로 별도 active_tab 체크 불필요
