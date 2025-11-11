@@ -257,7 +257,7 @@ def create_user_and_profile(user_data: Dict[str, Any]) -> Tuple[bool, str]:
             )
 
             cursor.execute(collection_insert_query, collection_data_tuple)
-            logger.info(f"3. collections 테이블에 삽입 완료.")
+            logger.info("3. collections 테이블에 삽입 완료.")
 
             # 4. users 테이블의 main_profile_id 업데이트 (옵션)
             # 기본 프로필이 생성되었으므로, users 테이블에 main_profile_id를 연결

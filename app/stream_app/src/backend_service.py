@@ -217,16 +217,20 @@ def api_get_profiles(user_id: str) -> Tuple[bool, list]:
     """
     try:
         time.sleep(MOCK_API_DELAY)
-        # [변경] 현재 DB 구조는 단일 프로필을 지원하므로, get_user_by_id를 사용하여
-        # 기본 프로필을 가져와 리스트 형태로 반환합니다.
+        # [변경] 현재 DB 구조는 단일 프로필을 지원하므로, get_user_by_id를 사용하여 기본 프로필을 가져와 리스트 형태로 반환합니다.
         success, user_info = database.get_user_by_id(user_id)
         if success and user_info:
+            # 프로필 데이터에 'id'와 'isActive' 속성 추가 (호환성 유지)
+            user_info["id"] = user_id  # 프로필 ID 추가
+            user_info["isActive"] = True  # 활성 상태 설정
+
+            # 다중 프로필 형식에 맞게 기본 프로필을 리스트에 담아 반환합니다.
+            return True, [user_info]
+        else:
             # 다중 프로필 형식에 맞게 기본 프로필을 리스트에 담아 반환합니다.
             user_info["id"] = user_id
             user_info["isActive"] = True
             return True, [user_info]
-        else:
-            return True, []
     except Exception as e:
         logger.error(f"사용자 프로필 리스트 조회 중 오류: {str(e)}")
         return False, []
@@ -272,11 +276,11 @@ def api_save_profiles(user_id: str, profiles_list: list) -> Tuple[bool, str]:
 
         sanitized = [_sanitize_profile(p) for p in profiles_list]
 
-        # [변경] 파일 I/O 로직을 db_utils.db_load_user_profiles() 호출로 대체
-        profiles_map = database.db_load_user_profiles()
-        profiles_map[user_id] = sanitized
-        # [변경] 파일 I/O 로직을 db_utils.db_save_user_profiles(profiles_map) 호출로 대체
-        database.db_save_user_profiles(profiles_map)
+        # [변경] 더 이상 사용되지 않는 함수 호출을 제거합니다.
+        # 현재 DB 구조에서는 사용자 프로필 리스트를 직접 저장하는 기능이 없습니다.
+        # 이 부분을 어떻게 처리할지 (예: DB에 저장하거나, 아니면 메모리에만 저장할지)
+        # 결정해야 합니다. 여기서는 일단 아무것도 하지 않도록 변경합니다.
+
         logger.info(
             f"사용자 프로필 리스트 저장 완료: {user_id} ({len(profiles_list)}개)"
         )

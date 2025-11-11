@@ -29,9 +29,10 @@ from src.backend_service import (
 )
 from src.backend_service import api_get_profiles # api_get_profiles는 여전히 사용
 from src.db.database import get_user_by_id as api_get_user_info_db
+from dotenv import load_dotenv
 
 
-# load_dotenv()
+load_dotenv()
 
 # ==============================================================================
 # 0. 전역 설정 및 CSS 주입

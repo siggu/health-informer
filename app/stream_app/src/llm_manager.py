@@ -1,5 +1,6 @@
 """ChatOpenAI 초기화 및 응답/스트리밍 11.10 수정"""
 
+import os
 from typing import List, Dict, Any, Optional
 
 from langchain_openai import ChatOpenAI
@@ -17,7 +18,7 @@ class LLMManager:
 
     def __init__(self, model: str = "gpt-4o-mini"):
         # LLM 초기화 (GPT-4o-mini 사용)
-        self.llm = ChatOpenAI(model=model)
+        self.llm = ChatOpenAI(model=model, api_key=os.getenv("OPENAI_API_KEY"))
 
     @classmethod
     def get_instance(cls) -> "LLMManager":
