@@ -8,7 +8,7 @@ from passlib.hash import bcrypt  # ✅ 비밀번호 해시 검증을 위해 추�
 # DB 직접 접근 함수 임포트 (상대 경로 사용)
 from src.db.database import (
     create_user_and_profile as api_signup_db,
-    get_user_by_id as api_get_user_info_db,
+    get_user_by_username as api_get_user_info_db,
     check_user_exists,
     get_user_password_hash,
 )
@@ -154,7 +154,7 @@ def render_login_tab():
             st.session_state["auth_error"]["login"] = ""
 
             # DB에서 프로필 정보 조회
-            ok, user_info = api_get_user_info_db(data["userId"])
+            ok, user_info = api_get_user_info_db(data["userId"]) # username으로 조회
             if ok:
                 st.session_state["user_info"] = user_info
                 profile = user_info.copy()
@@ -165,12 +165,12 @@ def render_login_tab():
                 st.session_state["user_info"] = {"userId": data["userId"]}
 
             # 저장된 프로필 리스트도 로드
-            ok_profiles, profiles_list = api_get_profiles(data["userId"])
+            ok_profiles, profiles_list = api_get_profiles(st.session_state.user_info.get("id")) # id(uuid)로 조회
             if ok_profiles and profiles_list:
                 st.session_state["profiles"] = profiles_list
 
             save_session(
-                data["userId"],
+                st.session_state.user_info.get("id"), # 세션에는 id(uuid) 저장
                 st.session_state.get("user_info", {"userId": data["userId"]}),
             )
         else:
@@ -218,7 +218,7 @@ def handle_signup_submit(signup_data: Dict[str, Any]):
 
     # 필드명 매핑 (database.py의 create_user_and_profile 함수와 일치시키기 위함)
     signup_data["username"] = signup_data.pop("userId")
-    signup_data["residency_sgg"] = signup_data.pop("location")
+    signup_data["residency_sgg_code"] = signup_data.pop("location")
     signup_data["insurance_type"] = signup_data.pop("healthInsurance")
     # ====================================================
 
@@ -228,11 +228,12 @@ def handle_signup_submit(signup_data: Dict[str, Any]):
     if success:
         # 회원가입 성공 시 자동 로그인 처리 및 세션 저장 로직은 동일
         user_info = {
+            "id": None, # create_user_and_profile은 id를 반환하지 않으므로, 로그인 후 채워야 함
             "userId": signup_data["username"],  # 세션에는 userId로 저장
             "name": signup_data.get("name", ""),
             "gender": signup_data.get("gender", ""),
             "birthDate": str(signup_data.get("birthDate", "")),
-            "location": signup_data.get("residency_sgg", ""),
+            "location": signup_data.get("residency_sgg_code", ""),
             "healthInsurance": signup_data.get("insurance_type", ""),  # 영문 ENUM 값
             "incomeLevel": signup_data.get("median_income", ""),
             "basicLivelihood": signup_data.get(

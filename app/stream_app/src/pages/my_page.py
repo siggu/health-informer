@@ -4,6 +4,7 @@ from datetime import date
 import streamlit as st
 from typing import Optional, Dict, Any 
 from ..backend_service import api_get_profiles, api_save_profiles
+from ..utils.template_loader import load_css
 
 
 def _parse_birthdate(value):
@@ -118,9 +119,7 @@ def handle_save_edit(edited_data):
 def _get_user_id() -> Optional[str]:
     user_info = st.session_state.get("user_info", {})
     if isinstance(user_info, dict):
-        return user_info.get("userId") or st.session_state.get("login_data", {}).get(
-            "userId"
-        )
+        return user_info.get("id")  # username 대신 UUID를 반환하도록 수정
     return None
 
 
@@ -132,33 +131,8 @@ def handle_cancel_edit():
 
 def render_my_page_modal():
     """마이페이지 모달 렌더링 (프로필 추가 / 편집 기능 포함)"""
-    st.markdown(
-        """
-        <style>
-        .modal-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(0, 0, 0, 0.5);
-            z-index: 1000;
-            display: flex;
-            justify-content: flex-end;
-            align-items: stretch;
-        }
-        .modal-content {
-            background-color: white;
-            width: 420px;
-            height: 100vh;
-            overflow-y: auto;
-            padding: 24px;
-            box-shadow: -2px 0 8px rgba(0,0,0,0.1);
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    # 마이페이지 모달에 필요한 CSS 파일을 로드합니다.
+    load_css("my_page.css")
 
     col_title, col_close = st.columns([9, 1])
     with col_title:
@@ -408,13 +382,5 @@ def render_my_page_modal():
             _uls(is_logged_in=False)
             st.session_state["is_logged_in"] = False
             st.session_state["show_profile"] = False
-            st.session_state["messages"] = [
-                {
-                    "id": str(uuid.uuid4()),
-                    "role": "assistant",
-                    "content": "안녕하세요! 정책 추천 챗봇입니다. 나이, 거주지, 관심 분야를 알려주시면 맞춤형 정책을 추천해드립니다.",
-                    "timestamp": time.time(),
-                }
-            ]
             st.success("로그아웃 되었습니다.")
-            st.rerun()
+            st.rerun() # 채팅 내용은 state_manager에서 관리하므로 여기서는 초기화하지 않습니다.

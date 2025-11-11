@@ -1,4 +1,5 @@
 """채팅 렌더링/메시지 전송/정책 카드 파싱 11.11수정"""
+
 import uuid
 import time
 import re
@@ -21,22 +22,6 @@ def _extract_policies_from_text(text: str):
     이 함수는 더 이상 사용되지 않습니다. 항상 None을 반환합니다.
     """
     return None
-
-
-# def _extract_policies_from_text(text: str):
-#     try:
-#         code_blocks = re.findall(r"```json\\s*([\\s\\S]*?)\\s*```", text, re.IGNORECASE)
-#         for block in code_blocks:
-#             data = json.loads(block)
-#             if (
-#                 isinstance(data, dict)
-#                 and "policies" in data
-#                 and isinstance(data["policies"], list)
-#             ):
-#                 return data["policies"]
-#     except Exception:
-#         pass
-#     return []
 
 
 # 챗봇 메세지 응답 화면
@@ -62,15 +47,16 @@ def handle_send_message(message: str):
 
     try:
         llm_manager = get_llm_manager()
-        placeholder = st.empty()
-        collected = ""
-        for delta in llm_manager.generate_response_stream(
-            history_messages=st.session_state.get("messages", []),
-            user_message=message,
-            active_profile=active_profile,
-        ):
-            collected += delta
-            placeholder.markdown(collected)
+        with st.spinner("답변 생성중..."):
+            placeholder = st.empty()
+            collected = ""
+            for delta in llm_manager.generate_response_stream(
+                history_messages=st.session_state.get("messages", []),
+                user_message=message,
+                active_profile=active_profile,
+            ):
+                collected += delta
+                placeholder.markdown(collected)
 
         assistant_message = {
             "id": str(uuid.uuid4()),
@@ -146,16 +132,20 @@ def render_chatbot_main():
                 handle_send_message(question)
 
     st.markdown("<div style='margin-top: 40px;'></div>", unsafe_allow_html=True)
-    col_input, col_send = st.columns([9, 1])
-    with col_input:
-        user_input = st.text_input(
-            "정책에 대해 질문해주세요...",
-            key="user_input",
-            label_visibility="collapsed",
-        )
-    with col_send:
-        if st.button("✈️", key="btn_send", use_container_width=True):
-            if user_input.strip():
-                handle_send_message(user_input)
+
+    # 폼을 사용하여 엔터 키로 메시지 전송
+    with st.form(key="chat_input_form", clear_on_submit=True):
+        col_input, col_send = st.columns([9, 1])
+        with col_input:
+            user_input = st.text_input(
+                "정책에 대해 질문해주세요...",
+                key="user_input",
+                label_visibility="collapsed",
+            )
+        with col_send:
+            submitted = st.form_submit_button("✈️", use_container_width=True)
+
+        if submitted and user_input.strip():
+            handle_send_message(user_input)
 
     render_template("components/disclaimer.html")

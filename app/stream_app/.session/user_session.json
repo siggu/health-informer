@@ -1,10 +1,10 @@
 {
-  "user_id": "test0001",
+  "user_id": "test01234",
   "user_info": {
-    "userId": "test0001",
-    "username": "test0001",
-    "birthDate": "1989-12-14",
-    "gender": "여성",
+    "userId": "test01234",
+    "username": "test01234",
+    "birthDate": "1990-01-01",
+    "gender": "남성",
     "location": null,
     "healthInsurance": "EMPLOYED",
     "incomeLevel": 100.0,
@@ -13,5 +13,5 @@
     "longTermCare": "NONE",
     "pregnancyStatus": "없음"
   },
-  "is_logged_in": true
+  "is_logged_in": false
 }

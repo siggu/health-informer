@@ -48,17 +48,15 @@ def handle_password_reset():
         st.session_state.password_error = "비밀번호는 8자 이상이어야 합니다."
         return
 
-    user_id = None
+    user_uuid = None
     user_info = st.session_state.get("user_info", {})
     if isinstance(user_info, dict):
-        user_id = user_info.get("userId") or st.session_state.get("login_data", {}).get(
-            "userId"
-        )
-    if not user_id:
+        user_uuid = user_info.get("id")  # 🚨 userId(username) 대신 id(UUID)를 사용
+    if not user_uuid:
         st.session_state.password_error = "로그인 정보를 찾을 수 없습니다."
         return
 
-    success, message = api_reset_password(user_id, data["current"], data["new"])
+    success, message = api_reset_password(user_uuid, data["current"], data["new"])
 
     if success:
         st.success(f"🔒 {message}")
@@ -80,17 +78,15 @@ def toggle_delete_confirm(value):
 
 
 def handle_account_delete():
-    user_id = None
+    user_uuid = None
     user_info = st.session_state.get("user_info", {})
     if isinstance(user_info, dict):
-        user_id = user_info.get("userId") or st.session_state.get("login_data", {}).get(
-            "userId"
-        )
-    if not user_id:
+        user_uuid = user_info.get("id") # UUID
+    if not user_uuid:
         st.error("계정 정보를 찾을 수 없습니다.")
         return
 
-    success, message = api_delete_account(user_id)
+    success, message = api_delete_account(user_uuid)
 
     if success:
         st.success(f"🗑️ {message}")

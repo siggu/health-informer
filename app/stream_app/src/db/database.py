@@ -245,7 +245,7 @@ def create_user_and_profile(user_data: Dict[str, Any]) -> Tuple[bool, str]:
                 code_system, code, onset_date, end_date,
                 negation, confidence, source_id, created_at
             )
-            VALUES (%s, %s, %s, %s, NULL, NULL, NULL, NULL, FALSE, 1.0, NULL, NOW());
+            VALUES (%s, %s, %s, %s, 'NONE', NULL, NULL, NULL, FALSE, 1.0, NULL, NOW());
             """
 
             # subject, predicate, object 만 사용하고 나머지는 NULL 또는 기본값 사용
@@ -296,19 +296,40 @@ def create_user_and_profile(user_data: Dict[str, Any]) -> Tuple[bool, str]:
 # --- 기존 함수는 테이블 변경에 따라 수정이 필요합니다. ---
 
 
-def get_user_by_id(user_id: str) -> Tuple[bool, Dict[str, Any]]:
+# ✅ [추가] 비밀번호 해시 조회 함수
+def get_user_password_hash(username: str) -> Optional[str]:
+    """DB에서 사용자의 비밀번호 해시를 조회합니다."""
+    conn = get_db_connection()
+    if not conn:
+        return None
+    try:
+        # 'users' 테이블과 'password_hash' 컬럼이 있다고 가정합니다.
+        query = "SELECT password_hash FROM users WHERE username = %s"
+        with conn.cursor() as cursor:
+            cursor.execute(query, (username,))
+            result = cursor.fetchone()
+            return result[0] if result else None
+    except Exception as e:
+        logger.error(f"비밀번호 해시 조회 중 오류: {username} - {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_user_and_profile_by_id(user_uuid: str) -> Tuple[bool, Dict[str, Any]]:
     """
-    user_id로 users와 profiles 테이블을 조인하여 사용자 정보를 조회합니다.
+    user_uuid로 users와 profiles 테이블을 조인하여 사용자 정보를 조회합니다.
     """
     conn = get_db_connection()
     if not conn:
         return False, {"error": "DB 연결 실패"}
 
     try:
-        # profiles 테이블만 조회하는 대신, users 테이블과 JOIN
         query = """
         SELECT 
-                u.username AS "userId", -- username을 userId로 반환
+            u.id AS "id", -- UUID
+            u.username AS "username",
             p.birth_date AS "birthDate",
             p.sex AS "gender",
             p.residency_sgg_code AS "location", 
@@ -317,22 +338,23 @@ def get_user_by_id(user_id: str) -> Tuple[bool, Dict[str, Any]]:
             p.basic_benefit_type AS "basicLivelihood",
             p.disability_grade AS "disabilityLevel",
             p.ltci_grade AS "longTermCare",
-            p.pregnant_or_postpartum12m AS "pregnancyStatus",
-            u.username
+            p.pregnant_or_postpartum12m AS "pregnancyStatus"
             FROM users u
             LEFT JOIN profiles p ON u.id = p.user_id
-            WHERE u.username = %s -- username으로 조회
+            WHERE u.id = %s -- UUID로 조회
             """
 
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute(query, (user_id,))
+            cursor.execute(query, (user_uuid,))
             row = cursor.fetchone()
 
             if row:
                 user_dict = dict(row)
-                # 기존 함수 출력 형식과 맞추기 위해 데이터 변환
                 result = {
-                    "userId": user_dict.get("userId"),
+                    "id": user_dict.get("id"),  # UUID
+                    "userId": user_dict.get(
+                        "username"
+                    ),  # 호환성을 위해 username을 userId로 유지
                     "username": user_dict.get("username"),
                     "birthDate": (
                         str(user_dict.get("birthDate", ""))
@@ -370,32 +392,98 @@ def get_user_by_id(user_id: str) -> Tuple[bool, Dict[str, Any]]:
             return False, {"error": "사용자를 찾을 수 없습니다."}
 
     except psycopg2.Error as e:
-        logger.error(f"사용자 조회 중 DB 오류: {user_id} - {e}")
+        logger.error(f"사용자 조회 중 DB 오류: {user_uuid} - {e}")
         return False, {"error": f"DB 조회 오류: {str(e)}"}
     except Exception as e:
-        logger.error(f"사용자 조회 중 예상치 못한 오류: {user_id} - {e}")
+        logger.error(f"사용자 조회 중 예상치 못한 오류: {user_uuid} - {e}")
         return False, {"error": f"예상치 못한 오류: {str(e)}"}
     finally:
         if conn:
             conn.close()
 
 
-# ✅ [추가] 비밀번호 해시 조회 함수
-def get_user_password_hash(username: str) -> Optional[str]:
-    """DB에서 사용자의 비밀번호 해시를 조회합니다."""
+def get_user_by_username(username: str) -> Tuple[bool, Dict[str, Any]]:
+    """
+    username으로 users와 profiles 테이블을 조인하여 사용자 정보를 조회합니다.
+    """
     conn = get_db_connection()
     if not conn:
-        return None
+        return False, {"error": "DB 연결 실패"}
+
     try:
-        # 'users' 테이블과 'password_hash' 컬럼이 있다고 가정합니다.
-        query = "SELECT password_hash FROM users WHERE username = %s"
-        with conn.cursor() as cursor:
+        # profiles 테이블만 조회하는 대신, users 테이블과 JOIN
+        query = """
+        SELECT 
+            u.id AS "id", -- UUID
+            u.username AS "username",
+            p.birth_date AS "birthDate",
+            p.sex AS "gender",
+            p.residency_sgg_code AS "location", 
+            p.insurance_type AS "healthInsurance",
+            p.median_income_ratio AS "incomeLevel",
+            p.basic_benefit_type AS "basicLivelihood",
+            p.disability_grade AS "disabilityLevel",
+            p.ltci_grade AS "longTermCare",
+            p.pregnant_or_postpartum12m AS "pregnancyStatus"
+            FROM users u
+            LEFT JOIN profiles p ON u.id = p.user_id
+            WHERE u.username = %s -- username으로 조회
+            """
+
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(query, (username,))
-            result = cursor.fetchone()
-            return result[0] if result else None
+            row = cursor.fetchone()
+
+            if row:
+                user_dict = dict(row)
+                # 기존 함수 출력 형식과 맞추기 위해 데이터 변환
+                result = {
+                    "id": user_dict.get("id"),  # UUID
+                    "userId": user_dict.get(
+                        "username"
+                    ),  # 호환성을 위해 username을 userId로 유지
+                    "username": user_dict.get("username"),
+                    "birthDate": (
+                        str(user_dict.get("birthDate", ""))
+                        if user_dict.get("birthDate")
+                        else ""
+                    ),
+                    "gender": (
+                        "남성"
+                        if user_dict.get("gender") == "M"
+                        else (
+                            "여성"
+                            if user_dict.get("gender") == "F"
+                            else user_dict.get("gender", "")
+                        )
+                    ),
+                    "location": user_dict.get("location", ""),
+                    "healthInsurance": user_dict.get("healthInsurance", ""),
+                    "incomeLevel": (
+                        float(user_dict.get("incomeLevel", 0.0))
+                        if user_dict.get("incomeLevel")
+                        else 0.0
+                    ),
+                    "basicLivelihood": user_dict.get("basicLivelihood", "NONE"),
+                    "disabilityLevel": (
+                        str(user_dict.get("disabilityLevel", "0"))
+                        if user_dict.get("disabilityLevel") is not None
+                        else "0"
+                    ),
+                    "longTermCare": user_dict.get("longTermCare", "NONE"),
+                    "pregnancyStatus": (
+                        "임신중" if user_dict.get("pregnancyStatus") else "없음"
+                    ),
+                }
+                return True, result
+            return False, {"error": "사용자를 찾을 수 없습니다."}
+
+    except psycopg2.Error as e:
+        logger.error(f"사용자 조회 중 DB 오류: {username} - {e}")
+        return False, {"error": f"DB 조회 오류: {str(e)}"}
     except Exception as e:
-        logger.error(f"비밀번호 해시 조회 중 오류: {username} - {e}")
-        return None
+        logger.error(f"사용자 조회 중 예상치 못한 오류: {username} - {e}")
+        return False, {"error": f"예상치 못한 오류: {str(e)}"}
     finally:
         if conn:
             conn.close()
@@ -412,16 +500,17 @@ def check_user_exists(username: str) -> bool:
         query = "SELECT 1 FROM users WHERE username = %s LIMIT 1"
         with conn.cursor() as cursor:
             cursor.execute(query, (username,))
-            return cursor.fetchone() is not None
+            result = cursor.fetchone()
+            return result[0] if result else None
     except Exception as e:
-        logger.error(f"사용자 존재 확인 중 오류: {username} - {e}")
-        return False
+        logger.error(f"비밀번호 해시 조회 중 오류: {username} - {e}")
+        return None
     finally:
         if conn:
             conn.close()
 
 
-def delete_user_account(username: str) -> Tuple[bool, str]:
+def delete_user_account(user_id: str) -> Tuple[bool, str]:
     """사용자 계정과 관련된 모든 데이터를 삭제합니다 (users, profiles, collections)."""
     conn = get_db_connection()
     if not conn:
@@ -429,29 +518,21 @@ def delete_user_account(username: str) -> Tuple[bool, str]:
 
     try:
         with conn.cursor() as cursor:
-            # users 테이블에서 username으로 id를 찾습니다.
-            cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
-            user_record = cursor.fetchone()
-            if not user_record:
-                return False, "사용자를 찾을 수 없습니다."
-
-            user_id_to_delete = user_record[0]
-
             # CASCADE 제약조건이 있다면 users 레코드만 삭제해도 관련 데이터가 삭제됩니다.
             # 제약조건이 없다면 profiles, collections 등을 수동으로 삭제해야 합니다.
             # 여기서는 users 테이블의 id를 사용하여 직접 삭제하는 방식을 가정합니다.
 
             # users 테이블에서 삭제
-            cursor.execute("DELETE FROM users WHERE id = %s", (user_id_to_delete,))
+            cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
 
             conn.commit()
-            logger.info(f"회원 탈퇴 완료: {username} (user_id: {user_id_to_delete})")
+            logger.info(f"회원 탈퇴 완료 (user_id: {user_id})")
             return True, "회원 탈퇴가 완료되었습니다."
 
     except Exception as e:
         if conn:
             conn.rollback()
-        logger.error(f"회원 탈퇴 중 오류 발생: {username} - {e}")
+        logger.error(f"회원 탈퇴 중 오류 발생 (user_id: {user_id}) - {e}")
         return False, "회원 탈퇴 처리 중 오류가 발생했습니다."
     finally:
         if conn:

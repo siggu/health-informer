@@ -27,8 +27,11 @@ from src.backend_service import (
     api_send_chat_message,
     api_reset_password,
 )
-from src.backend_service import api_get_profiles # api_get_profiles는 여전히 사용
-from src.db.database import get_user_by_id as api_get_user_info_db
+from src.backend_service import (
+    api_get_profiles,
+    api_get_user_info,
+)  # api_get_profiles는 여전히 사용
+from src.db.database import get_user_by_username as api_get_user_info_db
 from dotenv import load_dotenv
 
 
@@ -190,10 +193,11 @@ def main_app():
             st.session_state["is_logged_in"] = True
             st.session_state["user_info"] = saved_session.get("user_info", {})
             # 프로필도 복원 (백엔드에서 조회)
-            user_id = saved_session.get("user_id")
-            if user_id:
+            user_uuid = saved_session.get("user_id")  # 세션에는 UUID가 저장됨
+            username = st.session_state.user_info.get("username")
+            if user_uuid and username:
                 # [수정] DB에서 직접 사용자 정보 조회
-                ok, user_info = api_get_user_info_db(user_id)
+                ok, user_info = api_get_user_info(user_uuid)  # UUID로 조회
                 if ok:
                     st.session_state["user_info"] = user_info
 
@@ -202,7 +206,7 @@ def main_app():
                 if st.session_state.get("profiles") is None or not st.session_state.get(
                     "profiles"
                 ):
-                    okp, profiles_list = api_get_profiles(user_id)
+                    okp, profiles_list = api_get_profiles(user_uuid)
                     if okp and profiles_list:
                         st.session_state["profiles"] = profiles_list
             # 세션 복원 완료

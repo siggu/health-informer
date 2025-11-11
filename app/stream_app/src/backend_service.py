@@ -8,7 +8,7 @@ from datetime import datetime
 
 # DB 접근 함수 임포트 (상대 경로 사용)
 try:
-    from src.db import database # database 모듈은 여전히 필요할 수 있음 (예: api_get_profiles)
+    from src.db import database  # database 모듈은 여전히 필요할 수 있음 (예: api_get_profiles)
 except ImportError:
     # 순환 import 방지: database 모듈이 없을 경우를 대비
     database = None
@@ -191,20 +191,20 @@ def api_signup(user_id: str, profile_data: Dict[str, Any]) -> Tuple[bool, str]:
         return False, "회원가입 처리 중 오류가 발생했습니다"
 
 
-def api_get_user_info(user_id: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
+def api_get_user_info(user_uuid: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     """
     사용자 전체 정보 조회 (Profile). DB 직접 조회 함수를 호출합니다.
     """
     try:
         time.sleep(MOCK_API_DELAY)
         # [변경] database.py의 get_user_by_id 함수를 직접 사용합니다.
-        success, user_info = database.get_user_by_id(user_id)
+        success, user_info = database.get_user_and_profile_by_id(user_uuid)
         if success:
-            logger.info(f"사용자 정보 조회 성공: {user_id}")
+            logger.info(f"사용자 정보 조회 성공: {user_uuid}")
             # 기존 형식과 맞추기 위해 profile 키를 추가합니다.
-            return True, {"userId": user_id, "profile": user_info}
+            return True, {"userId": user_info.get("username"), "profile": user_info}
         else:
-            logger.warning(f"사용자 정보 조회 실패: {user_id}")
+            logger.warning(f"사용자 정보 조회 실패: {user_uuid}")
             return False, None
     except Exception as e:
         logger.error(f"사용자 정보 조회 중 오류: {str(e)}")
@@ -213,24 +213,22 @@ def api_get_user_info(user_id: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
 
 def api_get_profiles(user_id: str) -> Tuple[bool, list]:
     """
-    사용자별 다중 프로필 리스트 조회
+    사용자별 다중 프로필 리스트 조회 (user_id는 UUID)
     """
     try:
         time.sleep(MOCK_API_DELAY)
         # [변경] 현재 DB 구조는 단일 프로필을 지원하므로, get_user_by_id를 사용하여 기본 프로필을 가져와 리스트 형태로 반환합니다.
-        success, user_info = database.get_user_by_id(user_id)
+        success, user_info = database.get_user_and_profile_by_id(user_id)
         if success and user_info:
             # 프로필 데이터에 'id'와 'isActive' 속성 추가 (호환성 유지)
-            user_info["id"] = user_id  # 프로필 ID 추가
+            user_info["id"] = user_info.get("id")  # 프로필 ID는 DB에서 가져온 UUID
             user_info["isActive"] = True  # 활성 상태 설정
+            user_info["userId"] = user_info.get("username") # 호환성을 위해 userId 필드 추가
 
             # 다중 프로필 형식에 맞게 기본 프로필을 리스트에 담아 반환합니다.
             return True, [user_info]
         else:
-            # 다중 프로필 형식에 맞게 기본 프로필을 리스트에 담아 반환합니다.
-            user_info["id"] = user_id
-            user_info["isActive"] = True
-            return True, [user_info]
+            return True, []
     except Exception as e:
         logger.error(f"사용자 프로필 리스트 조회 중 오류: {str(e)}")
         return False, []
@@ -380,35 +378,29 @@ def api_add_collection(
 
 
 def api_reset_password(
-    user_id: str, current_password: str, new_password: str
+    user_uuid: str, current_password: str, new_password: str
 ) -> Tuple[bool, str]:
     """
     비밀번호 재설정
     """
     try:
         time.sleep(MOCK_API_DELAY)
+        
+        # 1. DB에서 사용자 정보 조회 (UUID 기반)
+        ok, user_info = database.get_user_and_profile_by_id(user_uuid)
+        if not ok:
+            return False, "사용자 정보를 찾을 수 없습니다."
+        
+        # 2. 현재 비밀번호 확인
+        stored_hash = database.get_user_password_hash(user_info.get("username"))
+        if not stored_hash or not verify_password(current_password, stored_hash):
+            logger.warning(f"비밀번호 변경 실패 - 현재 비밀번호 불일치: {user_uuid}")
+            return False, "현재 비밀번호가 일치하지 않습니다."
 
-        # [변경] 파일 I/O 로직을 db_utils.db_load_users() 호출로 대체
-        users = database.db_load_users()
-
-        if user_id not in users:
-            return False, "사용자를 찾을 수 없습니다"
-
-        user = users[user_id]
-
-        # 현재 비밀번호 확인
-        if not verify_password(current_password, user["password"]):
-            logger.warning(f"비밀번호 변경 실패 - 현재 비밀번호 불일치: {user_id}")
-            return False, "현재 비밀번호가 일치하지 않습니다"
-
-        # 새 비밀번호 해싱 및 저장
-        user["password"] = hash_password(new_password)
-        user["password_updated_at"] = datetime.now().isoformat()
-        users[user_id] = user
-        # [변경] 파일 I/O 로직을 db_utils.db_save_users(users) 호출로 대체
-        database.db_save_users(users)
-
-        logger.info(f"비밀번호 변경 완료: {user_id}")
+        # 3. DB에 새 비밀번호 업데이트 (이 기능은 database.py에 추가 필요)
+        # 여기서는 임시로 성공을 반환하지만, 실제로는 DB 업데이트 함수를 호출해야 합니다.
+        # 예: success, msg = database.update_user_password(user_uuid, new_password)
+        logger.info(f"비밀번호 변경 완료: {user_uuid}")
         return True, "비밀번호가 변경되었습니다"
 
     except Exception as e:

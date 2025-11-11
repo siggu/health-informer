@@ -1,7 +1,15 @@
 """템플릿 로더 유틸리티"""
 import os
 import streamlit as st
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+# Determine the base directory of the Streamlit app (app/stream_app)
+# This file is in app/stream_app/src/utils
+STREAM_APP_BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+TEMPLATES_DIR = os.path.join(STREAM_APP_BASE_DIR, "templates")
 
 
 def get_template_path(template_name: str) -> Path:
@@ -37,18 +45,15 @@ def render_template(template_name: str, **kwargs):
 
 def load_css(css_name: str):
     """CSS 파일을 로드하여 Streamlit에 주입"""
+    full_path = os.path.join(STREAM_APP_BASE_DIR, "styles", css_name)
     try:
-        base_dir = Path(__file__).parent.parent.parent
-        css_path = base_dir / "styles" / css_name
-        
-        with open(css_path, "r", encoding="utf-8") as f:
+        with open(full_path, "r", encoding="utf-8") as f:
             css_content = f.read()
-        
+
         st.markdown(f"<style>{css_content}</style>", unsafe_allow_html=True)
     except FileNotFoundError:
-        st.warning(f"CSS 파일을 찾을 수 없습니다: {css_name}")
-
-
-
-
-
+        logger.error(f"CSS 파일을 찾을 수 없습니다: {full_path}")
+        st.error(f"CSS 파일을 찾을 수 없습니다: {css_name}")
+    except Exception as e:
+        logger.error(f"CSS 파일을 로드하는 중 오류 발생: {full_path} - {e}")
+        st.error(f"CSS 파일을 로드하는 중 오류 발생: {css_name} - {e}")
