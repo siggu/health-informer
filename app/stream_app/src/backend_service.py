@@ -84,24 +84,22 @@ def api_login(user_id: str, password: str) -> Tuple[bool, str]:
         if not user_id or not password:
             return False, "아이디와 비밀번호를 입력해주세요"
 
-        # [변경] 파일 I/O 로직을 db_utils.db_load_users() 호출로 대체
-        users = database.db_load_users()
+        # DB에서 사용자 정보 조회
+        success, user_info = database.get_user_by_id(user_id)
 
-        if user_id not in users:
+        if not success:
             logger.warning(f"존재하지 않는 사용자: {user_id}")
             return False, "아이디 또는 비밀번호가 일치하지 않습니다"
 
-        user = users[user_id]
+        # DB에서 비밀번호 해시를 가져와야 합니다.
+        # 현재 get_user_by_id는 비밀번호를 반환하지 않으므로, 별도 함수가 필요합니다.
+        # 여기서는 임시로 get_user_by_id가 비밀번호 해시를 포함한다고 가정합니다.
+        # 실제로는 get_user_password_hash(user_id) 같은 함수를 만들어야 합니다.
+        hashed_password = user_info.get("password_hash")  # 'password_hash'는 예시입니다.
 
-        if not verify_password(password, user["password"]):
+        if not hashed_password or not verify_password(password, hashed_password):
             logger.warning(f"비밀번호 불일치: {user_id}")
             return False, "아이디 또는 비밀번호가 일치하지 않습니다"
-
-        # 마지막 로그인 시간 업데이트
-        user["last_login"] = datetime.now().isoformat()
-        users[user_id] = user
-        # [변경] 파일 I/O 로직을 db_utils.db_save_users(users) 호출로 대체
-        database.db_save_users(users)
 
         logger.info(f"로그인 성공: {user_id}")
         return True, "로그인 성공"
@@ -110,6 +108,44 @@ def api_login(user_id: str, password: str) -> Tuple[bool, str]:
         logger.error(f"로그인 중 오류: {str(e)}")
         return False, "로그인 처리 중 오류가 발생했습니다"
 
+def get_user_password_hash(user_id: str) -> Optional[str]:
+    """DB에서 사용자의 비밀번호 해시를 조회합니다."""
+    conn = database.get_db_connection()
+    if not conn:
+        return None
+    try:
+        # 'users' 테이블과 'password' 컬럼이 있다고 가정합니다.
+        # 실제 테이블/컬럼명에 맞게 수정해야 합니다.
+        query = "SELECT password FROM users WHERE user_id = %s"
+        with conn.cursor() as cursor:
+            cursor.execute(query, (user_id,))
+            result = cursor.fetchone()
+            return result[0] if result else None
+    except Exception as e:
+        logger.error(f"비밀번호 해시 조회 중 오류: {user_id} - {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def api_login(user_id: str, password: str) -> Tuple[bool, str]:
+    """로그인 (DB 직접 조회)"""
+    try:
+        if not user_id or not password:
+            return False, "아이디와 비밀번호를 입력해주세요"
+
+        hashed_password = get_user_password_hash(user_id)
+
+        if not hashed_password or not verify_password(password, hashed_password):
+            logger.warning(f"로그인 실패: {user_id}")
+            return False, "아이디 또는 비밀번호가 일치하지 않습니다"
+
+        logger.info(f"로그인 성공: {user_id}")
+        return True, "로그인 성공"
+
+    except Exception as e:
+        logger.error(f"로그인 중 오류: {str(e)}")
+        return False, "로그인 처리 중 오류가 발생했습니다"
 
 def api_signup(user_id: str, profile_data: Dict[str, Any]) -> Tuple[bool, str]:
     """

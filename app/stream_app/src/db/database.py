@@ -28,6 +28,7 @@ def get_db_connection():
             database=DB_CONFIG["database"],
             user=DB_CONFIG["user"],
             password=DB_CONFIG["password"],
+            client_encoding="UTF8",  # 한글 처리를 위한 인코딩 설정
         )
         return conn
     except Exception as e:
@@ -53,13 +54,8 @@ def _normalize_insurance_type(insurance_str: str) -> Optional[str]:
     """건강보험 종류를 DB 형식으로 변환"""
     if not insurance_str:
         return None
-    mapping = {
-        "직장": "WORKPLACE",
-        "지역": "LOCAL",
-        "피부양": "DEPENDENT",
-        "의료급여": "MEDICAL_AID",
-    }
-    return mapping.get(insurance_str)
+    # DB enum에 한글 값이 직접 저장되어 있으므로 변환 없이 그대로 반환
+    return insurance_str
 
 
 def _normalize_benefit_type(benefit_str: str) -> str:
