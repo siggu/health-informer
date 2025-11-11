@@ -26,7 +26,7 @@ from app.dao.utils_db import eprint, extract_sitename_from_url, get_weight
 # ─────────────────────────────────────────────
 # 상수
 # ─────────────────────────────────────────────
-EMB_DIM = 1536  # text-embedding-3-small 기준. 바꾸면 여기/DB 모두 일치시켜야 함.
+EMB_DIM = 1024  # bge-m3-ko 기준. 바꾸면 여기/DB 모두 일치시켜야 함.
 
 
 def _ensure_dir(p: str):
@@ -140,7 +140,7 @@ def build_vector_literal(vec, dim=EMB_DIM):
 # ─────────────────────────────────────────────
 # DB 업로드 (진행률 % 표시 + eval_* 반영 + pgvector 안전삽입)
 # ─────────────────────────────────────────────
-def upload_records(records, reset="none", emb_model="text-embedding-3-small", commit_every=50):
+def upload_records(records, reset="none", emb_model="dragonkue/BGE-m3-ko", commit_every=50):
     if not records:
         eprint("[upload] 업로드할 레코드가 없습니다.")
         return
@@ -207,18 +207,21 @@ def upload_records(records, reset="none", emb_model="text-embedding-3-small", co
 
             emb_rows = []
             title_emb_text = preprocess_title(title)
-            for fname, text_value in (("title", title_emb_text), ("requirements", requirements), ("benefits", benefits)):
+
+            for fname, text_value in (("title", title_emb_text),
+                                        ("requirements", requirements),
+                                        ("benefits", benefits)):
                 vec = get_embedding(text_value, emb_model)
                 if vec:
-                    # pgvector 삽입(문자열 리터럴 → ::vector 캐스팅은 dbsetup의 보조함수로도 가능)
-                    emb_rows.append((doc_id, fname, vec))
+                    lit = build_vector_literal(vec, EMB_DIM)   # ← 문자열 리터럴로 변환
+                    emb_rows.append((doc_id, fname, lit))
 
             if emb_rows:
                 execute_values(
                     cur,
                     "INSERT INTO embeddings (doc_id, field, embedding) VALUES %s",
                     emb_rows,
-                    template="(%s, %s, %s)"
+                    template="(%s, %s, %s::vector)"           # ← ::vector 캐스팅 필수
                 )
 
             inserted += 1

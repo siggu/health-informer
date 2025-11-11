@@ -2,11 +2,11 @@
 """
 dbreinforcer.py — eval_target / eval_content 기반 보강 (weight 미사용)
 - 보강 필요 기준:
-  · requirements: eval_target <= 5
-  · benefits    : eval_content <= 5
+  · requirements: eval_target <= 4
+  · benefits    : eval_content <= 4
 - 소스 선정:
-  · requirements 보강용 top5: eval_target DESC
-  · benefits    보강용 top5: eval_content DESC
+  · requirements 보강용 top3: eval_target DESC
+  · benefits    보강용 top3: eval_content DESC
 - 지역 특화 표현 일반화:
   예) "동작구 청년" → "청년", "강북구 거주자" → "주민", "서울시 구민" → "주민"
 """
@@ -54,17 +54,9 @@ def generalize_local_terms(text: str) -> str:
     if not text:
         return text
     s = text
-
-    # 1) "OO구 청년/아동/..." → "청년/아동/..."
     s = re.sub(fr"{_REGION}\s*{_GROUP}", lambda m: re.sub(fr"^{_REGION}\s*", "", m.group(0)), s)
-
-    # 2) "OO시/구 {_RESIDENT}" → "주민"
     s = re.sub(fr"{_REGION}\s*{_RESIDENT}", "주민", s)
-
-    # 3) 'OO지역 내', 'OO 관할' 등 지역 수식 제거(너무 공격적이지 않게 한정)
     s = re.sub(fr"{_REGION}\s*(?:지역|관할|내)\s*", "", s)
-
-    # 4) 중복 공백/개행 정리
     s = re.sub(r"[ \t]+", " ", s)
     s = re.sub(r"\n{3,}", "\n\n", s).strip()
     return s
@@ -80,7 +72,7 @@ ALTER TABLE documents
     ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 """
 
-# 대상 조회: policy_id 존재 + (eval_target<=5 또는 eval_content<=5)
+# 대상 조회: policy_id 존재 + (eval_target<=4 또는 eval_content<=4)
 TARGET_SELECT = """
 SELECT
     d.id,
@@ -126,6 +118,7 @@ WHERE s.policy_id = %(policy_id)s
       )
 """
 
+# ✅ Top-3만 사용
 SOURCES_ORDER_REQ = "ORDER BY COALESCE(s.eval_target, 0) DESC, GREATEST(length(COALESCE(s.requirements,'')), length(COALESCE(s.raw_text,''))) DESC LIMIT %(k)s"
 SOURCES_ORDER_BEN = "ORDER BY COALESCE(s.eval_content, 0) DESC, GREATEST(length(COALESCE(s.benefits,'')), length(COALESCE(s.raw_text,''))) DESC LIMIT %(k)s"
 
@@ -201,7 +194,7 @@ def build_prompt(title: str, sources: List[Dict[str, Any]], mode: str) -> Tuple[
     system = common_rules
     user = f"""정책 제목: {title}
 
-소스들:
+소스들(Top-3):
 -------------------------------------------------------------------------------
 {chr(10).join(blocks)}
 -------------------------------------------------------------------------------
@@ -253,16 +246,16 @@ def reinforce_field(
         print(f"    · {field}: 소스 없음 → 건너뜀")
         return False
 
-    # 디버그: 상위 5 소스 id와 점수
+    # 디버그: 상위 3 소스 id와 점수
     if field == "requirements":
-        dbg = ", ".join(f"{s['id']}:t={s.get('eval_target')}" for s in sources[:5])
+        dbg = ", ".join(f"{s['id']}:t={s.get('eval_target')}" for s in sources[:3])
     else:
-        dbg = ", ".join(f"{s['id']}:c={s.get('eval_content')}" for s in sources[:5])
-    print(f"    [Top5 {field} sources] {dbg}")
+        dbg = ", ".join(f"{s['id']}:c={s.get('eval_content')}" for s in sources[:3])
+    print(f"    [Top3 {field} sources] {dbg}")
 
-    # 프롬프트 (필요한 필드만)
+    # 프롬프트
     mode = "requirements" if field == "requirements" else "benefits"
-    system, user = build_prompt(title, sources, mode)
+    system, user = build_prompt(title, sources[:3], mode)
 
     try:
         comp = client.chat.completions.create(
@@ -294,13 +287,14 @@ def reinforce_field(
     # 업데이트 + 임베딩
     prov = {
         "policy_id": policy_id,
-        "source_doc_ids": [s["id"] for s in sources],
+        "source_doc_ids": [s["id"] for s in sources[:3]],
         "rank_metric": "eval_target" if field == "requirements" else "eval_content",
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "llm_model": llm_model,
         "target_field": field,
+        "topk": 3
     }
-    note = f"\n\n[LLM Reinforced {field} at {datetime.utcnow().isoformat()}Z] sources={','.join([str(s['id']) for s in sources])}\n"
+    note = f"\n\n[LLM Reinforced {field} at {datetime.utcnow().isoformat()}Z] sources={','.join([str(s['id']) for s in sources[:3]])}\n"
 
     with conn.cursor() as cur:
         cur.execute(
@@ -328,14 +322,15 @@ def main():
     p.add_argument("--policy-id", type=int, help="특정 policy_id만 처리")
     p.add_argument("--doc-id", type=int, help="특정 document id만 처리")
 
-    # 기준(요청 고정값: 0~10에서 5 이하가 보강 대상)
-    p.add_argument("--th-req", type=int, default=5, help="requirements 보강 임계값(eval_target ≤ th)")
-    p.add_argument("--th-ben", type=int, default=5, help="benefits 보강 임계값(eval_content ≤ th)")
+    # ✅ 기준(0~10에서 4 이하가 보강 대상)
+    p.add_argument("--th-req", type=int, default=4, help="requirements 보강 임계값(eval_target ≤ th)")
+    p.add_argument("--th-ben", type=int, default=4, help="benefits 보강 임계값(eval_content ≤ th)")
 
-    p.add_argument("--k", type=int, default=5, help="각 필드 보강 시 사용할 소스 상위 K")
+    # ✅ Top-3 사용
+    p.add_argument("--k", type=int, default=3, help="각 필드 보강 시 사용할 소스 상위 K")
     p.add_argument("--limit", type=int, default=200, help="대상 문서 최대 개수")
     p.add_argument("--model", default="gpt-4o-mini", help="LLM 모델명")
-    p.add_argument("--embed-model", default="text-embedding-3-small", help="임베딩 모델명")
+    p.add_argument("--embed-model", default="bge-m3-ko", help="임베딩 모델명")
     p.add_argument("--dry-run", action="store_true", help="DB 갱신 없이 시뮬레이션")
     p.add_argument("--no-add-columns", action="store_true", help="보강 컬럼 추가 생략")
     args = p.parse_args()

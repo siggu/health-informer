@@ -2,8 +2,10 @@
 import os
 import sys
 import psycopg2
-from psycopg2.extras import execute_values
 from dotenv import load_dotenv
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
+from psycopg2.extras import execute_values
+from app.dao import utils_db
 
 def _build_dsn_from_env() -> str:
     """
@@ -29,70 +31,104 @@ def _build_dsn_from_env() -> str:
     return f"postgresql://{user}:{pwd}@{host}:{port}/{name}"
 
 
-def _ensure_indexes(cur):
+def _ensure_indexes(cur, emb_table: str):
     index_sqls = [
         "CREATE INDEX IF NOT EXISTS idx_documents_weight ON documents(weight)",
         "CREATE INDEX IF NOT EXISTS idx_documents_policy_null ON documents((policy_id IS NULL))",
-        "CREATE INDEX IF NOT EXISTS idx_embeddings_field_doc_id ON embeddings(field, doc_id)",
-        # 필요시 pgvector IVF 인덱스 (환경에 맞게 조정)
-        # "CREATE INDEX IF NOT EXISTS idx_embeddings_title_ivfflat ON embeddings USING ivfflat (embeddings vector_cosine_ops) WITH (lists = 100) WHERE field = 'title'",
+        "CREATE INDEX IF NOT EXISTS idx_documents_policy_id ON documents(policy_id)",
+        f"CREATE INDEX IF NOT EXISTS idx_{emb_table}_field_doc_id ON {emb_table}(field, doc_id)",
     ]
     for sql in index_sqls:
         cur.execute(sql)
 
 
 def _reset_all_policy_ids(conn):
-    """
-    policy_id 전체를 NULL로 초기화.
-    """
+    """policy_id 전체를 NULL로 초기화."""
     with conn.cursor() as cur:
         cur.execute("UPDATE documents SET policy_id = NULL")
     conn.commit()
-# 1) 함수 보장 헬퍼 추가
-def _ensure_array_cosine_fn(conn, verbose=True):
-    sql = """
-    CREATE OR REPLACE FUNCTION array_cosine_similarity(a DOUBLE PRECISION[], b DOUBLE PRECISION[])
-    RETURNS DOUBLE PRECISION
-    LANGUAGE SQL
-    IMMUTABLE
-    STRICT
-    AS $$
-    SELECT CASE
-      WHEN a IS NULL OR b IS NULL THEN NULL
-      WHEN array_length(a,1) IS DISTINCT FROM array_length(b,1) THEN NULL
-      ELSE (
-        SELECT (SUM(a[i]*b[i])::DOUBLE PRECISION)
-               / NULLIF( sqrt(SUM(a[i]*a[i])) * sqrt(SUM(b[i]*b[i])) , 0)
-        FROM generate_subscripts(a,1) AS i
-      )
-    END
-    $$;
+
+
+def _has_higher_weight(conn, base_weight: float) -> bool:
+    """해당 base_weight보다 높은 weight 문서가 존재하는지 확인."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM documents WHERE weight > %s LIMIT 1", (base_weight,))
+        return cur.fetchone() is not None
+def unify_policy_ids_after_grouping(conn, *, commit_every: int = 100):
+    """
+    1차 그루핑(간선 생성/병합 등) 이후 실행.
+    - 각 policy 트리의 root를 구하고,
+    - 그 서브트리에 속한 모든 documents.policy_id를 root로 통일한다.
     """
     with conn.cursor() as cur:
-        cur.execute(sql)
-    conn.commit()
-    if verbose:
-        print("[INIT] array_cosine_similarity() 보장 완료")
+        # documents에 policy_id 없는 경우 대비
+        cur.execute("""
+            ALTER TABLE documents
+            ADD COLUMN IF NOT EXISTS policy_id BIGINT
+        """)
+        conn.commit()
 
+        # 현재 documents에 존재하는 policy_id 집합
+        cur.execute("SELECT DISTINCT policy_id FROM documents WHERE policy_id IS NOT NULL")
+        all_pids = [r[0] for r in cur.fetchall()]
+
+    if not all_pids:
+        print("unify_policy_ids_after_grouping: 정책 ID가 없습니다.")
+        return
+
+    visited_roots = set()
+    updates_done = 0
+    for pid in all_pids:
+        # 해당 pid가 속한 트리의 root
+        root = utils_db.get_policy_root_id(conn, pid)
+        if root in visited_roots:
+            continue
+        visited_roots.add(root)
+
+        # root 기준 서브트리 전체 policy_id 집합
+        subtree = utils_db.get_policy_subtree_ids(conn, root)
+        if not subtree:
+            continue
+
+        # 이미 root로 통일된 경우 skip
+        if subtree == {root}:
+            continue
+
+        # 통일 실행: 서브트리 전체를 root로
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE documents
+                SET policy_id = %s
+                WHERE policy_id = ANY(%s) AND policy_id IS DISTINCT FROM %s
+            """, (root, list(subtree), root))
+            changed = cur.rowcount
+
+        if changed:
+            updates_done += changed
+            if updates_done % commit_every == 0:
+                conn.commit()
+                print(f"  · 통일 진행중: {updates_done}건 업데이트 (root={root}, subtree_size={len(subtree)})")
+
+    conn.commit()
+    print(f"✅ policy_id 통일 완료: 총 {updates_done}건 업데이트")
 
 def assign_policy_ids(
     title_field: str = "title",
-    similarity_threshold: float = 0.75,
+    similarity_threshold: float = 0.8,
     batch_size: int = 500,
     dry_run: bool = False,
     reset_all_on_start: bool = False,
     verbose: bool = True,
 ):
     """
-    - '새 base'와의 유사도(sim_new)가 threshold 이상이고 기존 정책 sim_old보다 클 경우 policy_id 교체.
-    - 기본은 더 높은 weight만 대상으로 그룹핑하지만,
-      **상위 weight 문서가 하나도 없으면 동일 weight에서도 그룹핑(>=) 허용**.
+    규칙(업데이트):
+    1) 낮은 가중치부터 기준(base)으로 탐색 시작
+    2) base.title 임베딩과 target.title 임베딩의 유사도(sim_new)가 threshold 이상이면 매칭 후보
+    3) target.policy_id가 이미 존재하더라도, (현재 기준과의 유사도 sim_old)보다 sim_new가 클 때만 덮어쓰기
+       - sim_old는 target.policy_id가 가리키는 문서의 title 임베딩과의 유사도를 의미
+       - policy_id가 NULL이면 sim_old는 존재하지 않는 것으로 간주(=무조건 비교 대상)
+    4) 동일 가중치 비교 금지: 오직 t.weight > base_weight 만 허용
     """
-
-    load_dotenv()
-    if os.getenv("RESET_ALL_POLICY_IDS_ON_START", "").lower() in ("1", "true", "t", "yes", "y"):
-        reset_all_on_start = True
-
     emb_table = globals().get("_EMB_TABLE", "embeddings")
     emb_col   = globals().get("_EMB_COL", "embedding")
 
@@ -101,9 +137,8 @@ def assign_policy_ids(
     conn.autocommit = False
 
     try:
-        _ensure_array_cosine_fn(conn, verbose=verbose)
         with conn.cursor() as cur:
-            _ensure_indexes(cur)
+            _ensure_indexes(cur, emb_table)
         conn.commit()
 
         if reset_all_on_start:
@@ -111,52 +146,17 @@ def assign_policy_ids(
                 print("[INIT] policy_id 전체 NULL 초기화 수행")
             _reset_all_policy_ids(conn)
 
-        # 사전 점검
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT COUNT(DISTINCT d.id)
-                FROM documents d
-                JOIN {emb_table} e ON e.doc_id::bigint = d.id
-                WHERE e.field = %s
-                """,
-                (title_field,),
-            )
-            docs_with_title = cur.fetchone()[0]
-
-            cur.execute("SELECT COUNT(*) FROM documents WHERE policy_id IS NULL")
-            null_policies = cur.fetchone()[0]
-
-            # 상위 weight 존재 여부 점검
-            cur.execute("""
-                SELECT COUNT(*)
-                FROM documents d_low
-                JOIN documents d_high ON d_high.weight > d_low.weight
-            """)
-            comparable_pairs = cur.fetchone()[0]
-
-        # 상위 weight가 하나도 없으면 동일 weight도 허용(>=), 있으면 기본(>)
-        weight_op = ">=" if comparable_pairs == 0 else ">"
-        if verbose:
-            print(f"[CHECK] 제목임베딩 존재 문서수: {docs_with_title}")
-            print(f"[CHECK] policy_id NULL 문서수: {null_policies}")
-            print(f"[CHECK] '상위 weight' 가능한 페어수: {comparable_pairs}")
-            print(f"[MODE]  그룹핑 weight 조건: t.weight {weight_op} base_weight")
-            if docs_with_title == 0:
-                print(f"[HINT] 임베딩 field가 '{title_field}'가 맞는지, 테이블/컬럼명({_EMB_TABLE}/{_EMB_COL}) 확인")
-
-        # base 후보(=낮은 weight부터)
+        # base 후보: 제목 임베딩이 존재하는 문서만, weight 오름차순
         with conn.cursor() as cur:
             cur.execute(
                 f"""
                 SELECT d.id, d.weight
-                FROM documents d
-                WHERE EXISTS (
-                    SELECT 1 FROM {emb_table} e
-                    WHERE e.field = %s
-                      AND e.doc_id::bigint = d.id
-                )
-                ORDER BY d.weight ASC, d.id ASC
+                  FROM documents d
+                 WHERE EXISTS (
+                        SELECT 1 FROM {emb_table} e
+                         WHERE e.field = %s AND e.doc_id::bigint = d.id
+                       )
+                 ORDER BY d.weight ASC, d.id ASC
                 """,
                 (title_field,),
             )
@@ -164,6 +164,8 @@ def assign_policy_ids(
 
         if verbose:
             print(f"[RUN] base 문서 수: {len(bases)} (batch_size={batch_size}, dry_run={dry_run})")
+            print("[MODE] 비교 규칙: 항상 t.weight > base_weight (동일 가중치 비교 금지).")
+            print(f"[RULE] sim_new >= {similarity_threshold} 이고, (sim_old 없거나 sim_new > sim_old) 일 때만 매칭/덮어쓰기.")
 
         total_updates = 0
 
@@ -171,127 +173,118 @@ def assign_policy_ids(
             batch = bases[i : i + batch_size]
 
             for base_id, base_weight in batch:
+                weight_comp = ">"  # ★ 동일 가중치 비교 금지
+
+                if verbose:
+                    print(f"  [BASE] id={base_id}, weight={base_weight} → weight 조건: t.weight {weight_comp} base_weight")
+
                 with conn.cursor() as cur:
                     if dry_run:
-                        # 카운트만: weight 비교 연산자를 동적으로 주입
+                        # 후보 수 집계 (덮어쓰기 가능성까지 반영)
                         count_sql = f"""
                             WITH base AS (
-                                SELECT d.id AS base_id, e.{emb_col} AS base_emb
-                                FROM documents d
-                                JOIN {emb_table} e
-                                  ON e.doc_id::bigint = d.id AND e.field = %s
-                                WHERE d.id = %s
+                                SELECT e.{emb_col} AS base_emb
+                                  FROM {emb_table} e
+                                 WHERE e.field = %s AND e.doc_id::bigint = %s
+                                 LIMIT 1
                             ),
                             cand AS (
-                                SELECT
-                                    t.id AS target_id,
-                                    et.{emb_col} AS tgt_emb
-                                FROM documents t
-                                JOIN {emb_table} et
-                                  ON et.doc_id::bigint = t.id AND et.field = %s
-                                WHERE t.weight {weight_op} %s
+                                SELECT t.id AS target_id,
+                                       t.policy_id AS cur_pid,
+                                       et.{emb_col} AS tgt_emb,
+                                      ecur.{emb_col} AS cur_emb
+                                  FROM documents t
+                                  JOIN {emb_table} et
+                                    ON et.doc_id::bigint = t.id AND et.field = %s
+                                  LEFT JOIN {emb_table} ecur
+                                    ON ecur.field = %s
+                                   AND ecur.doc_id::bigint = t.policy_id
+                                 WHERE t.weight {weight_comp} %s
                             ),
                             sims AS (
-                                SELECT
-                                    c.target_id,
-                                    (1 - (c.tgt_emb <=> b.base_emb)) AS sim_new,
-                                    CASE
-                                        WHEN pol.pol_emb IS NULL THEN NULL
-                                        ELSE (1 - (c.tgt_emb <=> pol.pol_emb))
-                                    END AS sim_old
-                                FROM cand c
-                                CROSS JOIN base b
-                                LEFT JOIN LATERAL (
-                                    SELECT e.{emb_col} AS pol_emb
-                                    FROM {emb_table} e
-                                    WHERE e.doc_id::bigint = (
-                                        SELECT policy_id FROM documents WHERE id = c.target_id
-                                    )
-                                      AND e.field = %s
-                                    LIMIT 1
-                                ) pol ON TRUE
+                                SELECT c.target_id,
+                                       (1 - (c.tgt_emb <=> b.base_emb)) AS sim_new,
+                                       CASE WHEN c.cur_emb IS NULL THEN NULL
+                                            ELSE (1 - (c.tgt_emb <=> c.cur_emb))
+                                       END AS sim_old
+                                  FROM cand c
+                                  CROSS JOIN base b
                             )
                             SELECT COUNT(*)
-                            FROM sims
-                            WHERE sim_new >= %s
-                              AND (sim_old IS NULL OR sim_new > sim_old)
+                              FROM sims
+                             WHERE sim_new >= %s
+                               AND (sim_old IS NULL OR sim_new > sim_old)
                         """
-                        cur.execute(
-                            count_sql,
-                            (
-                                title_field,  # base 임베딩 field
-                                base_id,
-                                title_field,  # target 임베딩 field
-                                base_weight,
-                                title_field,  # 기존 policy 임베딩 field
-                                similarity_threshold,
-                            ),
-                        )
+                        params = [
+                            title_field,  # base 임베딩 field
+                            base_id,
+                            title_field,  # target 임베딩 field
+                            title_field,  # 현재 policy_id가 가리키는 문서의 임베딩 field
+                            base_weight,
+                            similarity_threshold,
+                        ]
+                        cur.execute(count_sql, tuple(params))
                         cnt = cur.fetchone()[0]
                         if verbose:
-                            print(f"  [DRY] base={base_id}, base_w={base_weight} → 후보 {cnt}건")
-
+                            print(f"    [DRY] 후보 {cnt}건 (sim_new >= {similarity_threshold} 이고 sim_new > sim_old)")
                     else:
-                        # 실제 업데이트: weight 비교 연산자 동적 적용
+                        # 실제 업데이트 (덮어쓰기 포함)
                         update_sql = f"""
                             WITH base AS (
                                 SELECT d.id AS base_id, e.{emb_col} AS base_emb
-                                FROM documents d
-                                JOIN {emb_table} e
-                                  ON e.doc_id::bigint = d.id AND e.field = %s
-                                WHERE d.id = %s
+                                  FROM documents d
+                                  JOIN {emb_table} e
+                                    ON e.doc_id::bigint = d.id AND e.field = %s
+                                 WHERE d.id = %s
+                                 LIMIT 1
                             ),
                             cand AS (
-                                SELECT
-                                    t.id AS target_id,
-                                    et.{emb_col} AS tgt_emb
-                                FROM documents t
-                                JOIN {emb_table} et
-                                  ON et.doc_id::bigint = t.id AND et.field = %s
-                                WHERE t.weight {weight_op} %s
-                                FOR UPDATE OF t SKIP LOCKED
+                                SELECT t.id AS target_id,
+                                       t.policy_id AS cur_pid,
+                                       et.{emb_col} AS tgt_emb,
+                                       ecur.{emb_col} AS cur_emb
+                                  FROM documents t
+                                  JOIN {emb_table} et
+                                    ON et.doc_id::bigint = t.id AND et.field = %s
+                                  LEFT JOIN {emb_table} ecur
+                                    ON ecur.field = %s
+                                   AND ecur.doc_id::bigint = t.policy_id
+                                 WHERE t.weight {weight_comp} %s
+                                 FOR UPDATE OF t SKIP LOCKED
                             ),
                             sims AS (
-                                SELECT
-                                    c.target_id,
-                                    (1 - (c.tgt_emb <=> b.base_emb)) AS sim_new,
-                                    CASE
-                                        WHEN pol.pol_emb IS NULL THEN NULL
-                                        ELSE (1 - (c.tgt_emb <=> pol.pol_emb))
-                                    END AS sim_old
-                                FROM cand c
-                                CROSS JOIN base b
-                                LEFT JOIN LATERAL (
-                                    SELECT e.{emb_col} AS pol_emb
-                                    FROM {emb_table} e
-                                    WHERE e.doc_id::bigint = (
-                                        SELECT policy_id FROM documents WHERE id = c.target_id
-                                    )
-                                      AND e.field = %s
-                                    LIMIT 1
-                                ) pol ON TRUE
+                                SELECT c.target_id,
+                                       (1 - (c.tgt_emb <=> b.base_emb)) AS sim_new,
+                                       CASE WHEN c.cur_emb IS NULL THEN NULL
+                                            ELSE (1 - (c.tgt_emb <=> c.cur_emb))
+                                       END AS sim_old,
+                                       b.base_id
+                                  FROM cand c
+                                  CROSS JOIN base b
+                            ),
+                            to_upd AS (
+                                SELECT target_id, base_id
+                                  FROM sims
+                                 WHERE sim_new >= %s
+                                   AND (sim_old IS NULL OR sim_new > sim_old)
                             )
                             UPDATE documents t
-                               SET policy_id = (SELECT base_id FROM base)
-                              FROM sims
-                             WHERE t.id = sims.target_id
-                               AND sims.sim_new >= %s
-                               AND (sims.sim_old IS NULL OR sims.sim_new > sims.sim_old)
+                               SET policy_id = u.base_id
+                              FROM to_upd u
+                             WHERE t.id = u.target_id
                             RETURNING t.id
                         """
-                        cur.execute(
-                            update_sql,
-                            (
-                                title_field,  # base 임베딩 field
-                                base_id,
-                                title_field,  # target 임베딩 field
-                                base_weight,
-                                title_field,  # 기존 policy 임베딩 field
-                                similarity_threshold,
-                            ),
-                        )
-                        updated = cur.fetchall()
-                        total_updates += len(updated)
+                        params = [
+                            title_field,  # base 임베딩 field
+                            base_id,
+                            title_field,  # target 임베딩 field
+                            title_field,  # 현재 policy_id가 가리키는 문서의 임베딩 field
+                            base_weight,
+                            similarity_threshold,
+                        ]
+                        cur.execute(update_sql, tuple(params))
+                        updated_rows = cur.fetchall()
+                        total_updates += len(updated_rows)
 
             conn.commit()
             if verbose:
@@ -305,9 +298,6 @@ def assign_policy_ids(
             "total_updates": total_updates,
             "similarity_threshold": similarity_threshold,
             "batch_size": batch_size,
-            "dry_run": dry_run,
-            "reset_all_on_start": reset_all_on_start,
-            "weight_compare_op": weight_op,
         }
 
     except Exception as e:
@@ -317,8 +307,8 @@ def assign_policy_ids(
     finally:
         conn.close()
 
+
 if __name__ == "__main__":
-    # 실행 파라미터를 간단히 하드코딩하거나 argparse로 CLI 지원
     from argparse import ArgumentParser
 
     p = ArgumentParser()
@@ -330,23 +320,22 @@ if __name__ == "__main__":
                    help="시작 시 documents.policy_id 전체 NULL 초기화")
     p.add_argument("--verbose", action="store_true", default=True)
 
-    # (선택) 스키마 불일치 대응 옵션
+    # 임베딩 테이블/컬럼명 오버라이드
     p.add_argument("--emb-table", default=os.getenv("EMB_TABLE", "embeddings"),
-                   help="임베딩 테이블명(기본 embeddings). dbloader가 doc_field_embeddings를 썼다면 여기 지정")
+                   help="임베딩 테이블명 (기본: embeddings)")
     p.add_argument("--emb-col", default=os.getenv("EMB_COL", "embedding"),
-                   help="임베딩 컬럼명(기본 embedding). dbloader가 embedding(단수)라면 여기 지정")
+                   help="임베딩 컬럼명 (기본: embedding)")
+
+    # 2차 통일 패스 on/off 옵션 (원하면 끌 수 있게)
+    p.add_argument("--unify", action="store_true", default=True,
+                   help="1차 그루핑 후 policy_id를 루트로 통일 (default: on)")
 
     args = p.parse_args()
 
-    # 테이블/컬럼명 오버라이드가 필요하면 전역 상수로 설정
-    EMB_TABLE = args.emb_table
-    EMB_COL = args.emb_col
+    globals()["_EMB_TABLE"] = args.emb_table
+    globals()["_EMB_COL"] = args.emb_col
 
-    # SQL에서 사용할 수 있게 전역 변수처럼 바인딩
-    globals()["_EMB_TABLE"] = EMB_TABLE
-    globals()["_EMB_COL"] = EMB_COL
-
-    # assign_policy_ids 내부 SQL이 이 전역을 참조하도록 아래 패치 버전으로 교체(다음 섹션 참고)
+    # 1) 1차 그루핑 수행
     res = assign_policy_ids(
         title_field=args.title_field,
         similarity_threshold=args.threshold,
@@ -356,3 +345,13 @@ if __name__ == "__main__":
         verbose=args.verbose,
     )
     print(res)
+
+    # 2) 2차 통일 패스 (별도 커넥션 열어서 실행)
+    if args.unify and not args.dry_run:
+        dsn = _build_dsn_from_env()
+        conn = psycopg2.connect(dsn)
+        try:
+            unify_policy_ids_after_grouping(conn)
+        finally:
+            conn.close()
+
