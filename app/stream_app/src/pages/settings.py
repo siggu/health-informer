@@ -3,9 +3,13 @@ import time
 import streamlit as st
 
 from ..utils.session_manager import clear_session
-from ..db.database import delete_user_account as api_delete_account, get_user_password_hash
+from ..db.database import (
+    delete_user_account as api_delete_account,
+    get_user_password_hash,
+)
 
 
+# 설정 setting 초기화
 def initialize_settings_state():
     if "settings_modal_open" not in st.session_state:
         st.session_state.settings_modal_open = False
@@ -81,7 +85,7 @@ def handle_account_delete():
     user_uuid = None
     user_info = st.session_state.get("user_info", {})
     if isinstance(user_info, dict):
-        user_uuid = user_info.get("id") # UUID
+        user_uuid = user_info.get("id")  # UUID
     if not user_uuid:
         st.error("계정 정보를 찾을 수 없습니다.")
         return

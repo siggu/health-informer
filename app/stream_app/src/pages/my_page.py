@@ -53,7 +53,6 @@ def handle_profile_switch(profile_id):
         st.rerun()
 
 
-
 def handle_delete_profile(profile_id):
     if len(st.session_state.profiles) <= 1:
         st.warning("최소한 하나의 프로필은 남겨야 합니다.")

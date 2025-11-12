@@ -539,7 +539,9 @@ def delete_user_account(user_id: str) -> Tuple[bool, str]:
             conn.close()
 
 
-def add_profile(user_uuid: str, profile_data: Dict[str, Any]) -> Tuple[bool, Optional[int]]:
+def add_profile(
+    user_uuid: str, profile_data: Dict[str, Any]
+) -> Tuple[bool, Optional[int]]:
     """새로운 프로필을 profiles 테이블에 추가합니다."""
     conn = get_db_connection()
     if not conn:
@@ -550,12 +552,22 @@ def add_profile(user_uuid: str, profile_data: Dict[str, Any]) -> Tuple[bool, Opt
             birth_date_str = _normalize_birth_date(profile_data.get("birthDate"))
             sex = _normalize_sex(profile_data.get("gender", ""))
             residency_sgg_code = profile_data.get("location", "").strip() or None
-            insurance_type = _normalize_insurance_type(profile_data.get("healthInsurance", ""))
-            median_income_ratio = _normalize_income_ratio(profile_data.get("incomeLevel"))
-            basic_benefit_type = _normalize_benefit_type(profile_data.get("basicLivelihood", "NONE"))
-            disability_grade = _normalize_disability_grade(profile_data.get("disabilityLevel", "0"))
+            insurance_type = _normalize_insurance_type(
+                profile_data.get("healthInsurance", "")
+            )
+            median_income_ratio = _normalize_income_ratio(
+                profile_data.get("incomeLevel")
+            )
+            basic_benefit_type = _normalize_benefit_type(
+                profile_data.get("basicLivelihood", "NONE")
+            )
+            disability_grade = _normalize_disability_grade(
+                profile_data.get("disabilityLevel", "0")
+            )
             ltci_grade = _normalize_ltci_grade(profile_data.get("longTermCare", "NONE"))
-            pregnant_or_postpartum12m = _normalize_pregnant_status(profile_data.get("pregnancyStatus", "없음"))
+            pregnant_or_postpartum12m = _normalize_pregnant_status(
+                profile_data.get("pregnancyStatus", "없음")
+            )
 
             query = """
             INSERT INTO profiles (
@@ -566,7 +578,7 @@ def add_profile(user_uuid: str, profile_data: Dict[str, Any]) -> Tuple[bool, Opt
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             RETURNING id;
             """
-            
+
             data_tuple = (
                 user_uuid,
                 birth_date_str,
@@ -583,7 +595,9 @@ def add_profile(user_uuid: str, profile_data: Dict[str, Any]) -> Tuple[bool, Opt
             cursor.execute(query, data_tuple)
             new_profile_id = cursor.fetchone()[0]
             conn.commit()
-            logger.info(f"새 프로필 추가 성공. user_uuid: {user_uuid}, new_profile_id: {new_profile_id}")
+            logger.info(
+                f"새 프로필 추가 성공. user_uuid: {user_uuid}, new_profile_id: {new_profile_id}"
+            )
             return True, new_profile_id
 
     except Exception as e:
@@ -607,12 +621,22 @@ def update_profile(profile_id: int, profile_data: Dict[str, Any]) -> bool:
             birth_date_str = _normalize_birth_date(profile_data.get("birthDate"))
             sex = _normalize_sex(profile_data.get("gender", ""))
             residency_sgg_code = profile_data.get("location", "").strip() or None
-            insurance_type = _normalize_insurance_type(profile_data.get("healthInsurance", ""))
-            median_income_ratio = _normalize_income_ratio(profile_data.get("incomeLevel"))
-            basic_benefit_type = _normalize_benefit_type(profile_data.get("basicLivelihood", "NONE"))
-            disability_grade = _normalize_disability_grade(profile_data.get("disabilityLevel", "0"))
+            insurance_type = _normalize_insurance_type(
+                profile_data.get("healthInsurance", "")
+            )
+            median_income_ratio = _normalize_income_ratio(
+                profile_data.get("incomeLevel")
+            )
+            basic_benefit_type = _normalize_benefit_type(
+                profile_data.get("basicLivelihood", "NONE")
+            )
+            disability_grade = _normalize_disability_grade(
+                profile_data.get("disabilityLevel", "0")
+            )
             ltci_grade = _normalize_ltci_grade(profile_data.get("longTermCare", "NONE"))
-            pregnant_or_postpartum12m = _normalize_pregnant_status(profile_data.get("pregnancyStatus", "없음"))
+            pregnant_or_postpartum12m = _normalize_pregnant_status(
+                profile_data.get("pregnancyStatus", "없음")
+            )
 
             query = """
             UPDATE profiles SET
@@ -621,11 +645,18 @@ def update_profile(profile_id: int, profile_data: Dict[str, Any]) -> bool:
                 ltci_grade = %s, pregnant_or_postpartum12m = %s, updated_at = NOW()
             WHERE id = %s;
             """
-            
+
             data_tuple = (
-                birth_date_str, sex, residency_sgg_code, insurance_type,
-                median_income_ratio, basic_benefit_type, disability_grade,
-                ltci_grade, pregnant_or_postpartum12m, profile_id
+                birth_date_str,
+                sex,
+                residency_sgg_code,
+                insurance_type,
+                median_income_ratio,
+                basic_benefit_type,
+                disability_grade,
+                ltci_grade,
+                pregnant_or_postpartum12m,
+                profile_id,
             )
 
             cursor.execute(query, data_tuple)
@@ -668,7 +699,7 @@ def get_all_profiles_by_user_id(user_uuid: str) -> Tuple[bool, List[Dict[str, An
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(query, (user_uuid,))
             profiles = cursor.fetchall()
-            
+
             # 데이터 정규화 (예: 날짜를 문자열로)
             result_profiles = []
             for profile in profiles:

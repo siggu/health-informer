@@ -10,9 +10,7 @@ from src.db.database import (
     create_user_and_profile as api_signup_db,
     get_user_by_username as api_get_user_info_db,
     check_user_exists,
-    get_user_password_hash, 
-    get_user_password_hash, 
-    get_all_profiles_by_user_id,
+    get_user_password_hash,
     get_all_profiles_by_user_id,
 )
 
@@ -190,9 +188,7 @@ def handle_signup_submit(signup_data: Dict[str, Any]):
     if signup_data.get("password") != signup_data.get("confirmPassword"):
         return False, "비밀번호와 비밀번호 확인이 일치하지 않습니다."
 
-    signup_data["password"] = bcrypt.hash(
-        signup_data["password"].encode("utf-8")
-    )
+    signup_data["password"] = bcrypt.hash(signup_data["password"].encode("utf-8"))
     # ====================================================
     # ✅ [수정 핵심] ENUM 값 매핑 로직 (DB 전송 직전)
     # ====================================================
@@ -225,7 +221,7 @@ def handle_signup_submit(signup_data: Dict[str, Any]):
     if success:
         # 회원가입 성공 시 자동 로그인 처리 및 세션 저장 로직은 동일
         user_info = {
-            "id": None, # create_user_and_profile은 id를 반환하지 않으므로, 로그인 후 채워야 함
+            "id": None,  # create_user_and_profile은 id를 반환하지 않으므로, 로그인 후 채워야 함
             "userId": signup_data["username"],  # 세션에는 userId로 저장
             "name": signup_data.get("name", ""),
             "gender": signup_data.get("gender", ""),

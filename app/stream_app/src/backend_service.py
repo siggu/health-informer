@@ -8,7 +8,8 @@ from datetime import datetime
 
 # DB 접근 함수 임포트 (상대 경로 사용)
 try:
-    from src.db import database  # database 모듈은 여전히 필요할 수 있음 (예: api_get_profiles)
+    from src.db import database  
+    # database 모듈은 여전히 필요할 수 있음 (예: api_get_profiles)
 except ImportError:
     # 순환 import 방지: database 모듈이 없을 경우를 대비
     database = None
