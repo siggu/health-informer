@@ -1,7 +1,7 @@
 # app/crawling/dbsetup_pipeline.py
 # 목적: district, welfare, ehealth 크롤러 → DB 업로드 → policy_id 그루핑
 # 중간 JSON 없이, 메모리에서 바로 documents/embeddings에 삽입
-# 진행률(%) 출력 + eval_scores/eval_overall 반영 + pgvector 안전삽입 버전
+# 진행률(%) 출력 + pgvector 안전삽입 버전
 
 import os, sys, argparse, traceback
 from datetime import datetime
@@ -11,8 +11,9 @@ from openai import OpenAI
 from dotenv import load_dotenv
 
 # 프로젝트 루트 경로 보정
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-sys.path.insert(0, PROJECT_ROOT)
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from app.crawling.crawlers.district_crawler import DistrictCrawler
 from app.crawling.crawlers.welfare_crawler import WelfareCrawler
@@ -25,7 +26,7 @@ from app.dao.utils_db import eprint, extract_sitename_from_url, get_weight
 # ─────────────────────────────────────────────
 # 상수
 # ─────────────────────────────────────────────
-EMB_DIM = 1536  # text-embedding-3-small 기준. 바꾸면 여기/DB 모두 일치시켜야 함.
+EMB_DIM = 1024  # bge-m3-ko 기준. 바꾸면 여기/DB 모두 일치시켜야 함.
 
 
 def _ensure_dir(p: str):
@@ -69,7 +70,7 @@ def ensure_pgvector(conn):
 
 
 def ensure_documents_schema(conn):
-    """dbuploader.ensure_documents_schema 사용 (eval_scores/eval_overall 포함)"""
+    """dbuploader.ensure_documents_schema 사용 (eval_target/eval_content 포함)"""
     with conn.cursor() as cur:
         dbuploader.ensure_documents_schema(cur)
     conn.commit()
@@ -139,7 +140,7 @@ def build_vector_literal(vec, dim=EMB_DIM):
 # ─────────────────────────────────────────────
 # DB 업로드 (진행률 % 표시 + eval_* 반영 + pgvector 안전삽입)
 # ─────────────────────────────────────────────
-def upload_records(records, reset="none", emb_model="text-embedding-3-small", commit_every=50):
+def upload_records(records, reset="none", emb_model="dragonkue/BGE-m3-ko", commit_every=50):
     if not records:
         eprint("[upload] 업로드할 레코드가 없습니다.")
         return
@@ -181,7 +182,6 @@ def upload_records(records, reset="none", emb_model="text-embedding-3-small", co
             region = item.get("region","")
 
             # NEW: 0~10 원시점수 + 합성점수
-            eval_scores  = item.get("eval_scores")
             eval_target  = item.get("eval_target")
             eval_content = item.get("eval_content")
 
@@ -191,34 +191,37 @@ def upload_records(records, reset="none", emb_model="text-embedding-3-small", co
             cur.execute("""
                 INSERT INTO documents
                     (title, requirements, benefits, raw_text, url, policy_id,
-                     region, sitename, weight, eval_scores, eval_target, eval_content,
+                     region, sitename, weight, eval_target, eval_content,
                      llm_reinforced, llm_reinforced_sources)
                 VALUES
                     (%s, %s, %s, %s, %s, %s,
                      %s, %s, %s, %s, %s, %s,
-                     %s, %s)
+                     %s)
                 RETURNING id;
             """, (
                 title, requirements, benefits, raw_text, url, None,
-                region, sitename, weight, Json(eval_scores) if eval_scores is not None else None,
-                eval_target, eval_content, False, None
+                region, sitename, weight, eval_target, eval_content, 
+                False, None
             ))
             doc_id = cur.fetchone()[0]
 
             emb_rows = []
             title_emb_text = preprocess_title(title)
-            for fname, text_value in (("title", title_emb_text), ("requirements", requirements), ("benefits", benefits)):
+
+            for fname, text_value in (("title", title_emb_text),
+                                        ("requirements", requirements),
+                                        ("benefits", benefits)):
                 vec = get_embedding(text_value, emb_model)
                 if vec:
-                    # pgvector 삽입(문자열 리터럴 → ::vector 캐스팅은 dbsetup의 보조함수로도 가능)
-                    emb_rows.append((doc_id, fname, vec))
+                    lit = build_vector_literal(vec, EMB_DIM)   # ← 문자열 리터럴로 변환
+                    emb_rows.append((doc_id, fname, lit))
 
             if emb_rows:
                 execute_values(
                     cur,
                     "INSERT INTO embeddings (doc_id, field, embedding) VALUES %s",
                     emb_rows,
-                    template="(%s, %s, %s)"
+                    template="(%s, %s, %s::vector)"           # ← ::vector 캐스팅 필수
                 )
 
             inserted += 1
