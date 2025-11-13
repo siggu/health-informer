@@ -1,4 +1,4 @@
-"""세션 관리 유틸리티 - 로그인 상태 영구 저장"""
+"""세션 관리 유틸리티 함수들 11.13 수정"""
 
 import json
 import logging
@@ -111,4 +111,3 @@ def clear_session():
             logger.info("세션 파일 삭제 완료")
     except Exception as e:
         logger.error(f"세션 삭제 실패: {e}")
-

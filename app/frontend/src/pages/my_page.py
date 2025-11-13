@@ -1,14 +1,9 @@
-"""마이페이지 관련 함수들 11.12 수정"""
+"""마이페이지 관련 함수들 11.13 수정"""
 
 from datetime import date
 import streamlit as st
 from typing import Optional
-from ..backend_service import (
-    api_save_profiles,
-    api_get_all_profiles_by_user_id,
-    api_update_user_main_profile_id,
-    api_delete_profile,
-)
+from ..backend_service import backend_service
 from ..utils.template_loader import load_css
 
 
@@ -53,9 +48,9 @@ def handle_profile_switch(profile_id):
     for p in st.session_state.profiles:
         p["isActive"] = p["id"] == profile_id
     # 영구 저장
-    user_uuid = _get_user_id()
-    if user_uuid:
-        success, message = api_update_user_main_profile_id(user_uuid, profile_id)
+    token = _get_auth_token()
+    if token:
+        success, message = backend_service.set_main_profile(token, profile_id)
         if success:
             st.success("활성 프로필이 변경되었습니다.")
             # DB에서 최신 프로필 목록을 다시 가져와 세션 상태 업데이트 (isActive 반영)
@@ -70,10 +65,10 @@ def handle_delete_profile(profile_id):
         st.warning("최소한 하나의 프로필은 남겨야 합니다.")
         return  # Do not proceed with deletion if only one profile exists
 
-    user_uuid = _get_user_id()
-    if user_uuid:
+    token = _get_auth_token()
+    if token:
         # DB에서 직접 프로필 삭제
-        success, message = api_delete_profile(profile_id)
+        success, message = backend_service.delete_profile(token, profile_id)
         if success:
             st.success("프로필이 삭제되었습니다.")
 
@@ -91,14 +86,15 @@ def handle_delete_profile(profile_id):
             if is_active_deleted and st.session_state.profiles:
                 # 남은 프로필 중 첫 번째를 새 활성 프로필로 지정
                 new_active_profile_id = st.session_state.profiles[0]["id"]
-                success_activate, msg_activate = api_update_user_main_profile_id(
-                    user_uuid, new_active_profile_id
+                success_activate, msg_activate = backend_service.set_main_profile(
+                    token, new_active_profile_id
                 )
                 if not success_activate:
                     st.error(f"새 활성 프로필 설정 중 오류 발생: {msg_activate}")
             elif not st.session_state.profiles:
                 # 모든 프로필이 삭제된 경우 main_profile_id를 NULL로 설정
-                api_update_user_main_profile_id(user_uuid, None)
+                # 이 로직은 백엔드에서 처리하거나, 별도 API가 필요할 수 있습니다.
+                pass
 
             _refresh_profiles_from_db()  # 삭제 및 활성 프로필 변경 후 프로필 목록 새로고침
         else:
@@ -110,32 +106,23 @@ def handle_add_profile(new_profile_data):
     if not new_profile_data.get("name") or not new_profile_data.get("location"):
         st.error("프로필 이름과 거주지는 필수 입력 항목입니다.")
         return
-    for p in st.session_state.profiles:
-        p["isActive"] = False
-    new_profile = {
-        "id": None,
-        **new_profile_data,
-        "isActive": True,
-    }  # 🚨 id를 None으로 설정하여 신규 프로필임을 명시
-    st.session_state.profiles.append(new_profile)
-    st.session_state.isAddingProfile = False
-    # st.session_state.newProfile = {}
-    # 영구 저장
-    user_uuid = _get_user_id()
-    if user_uuid:
-        success, message, updated_profiles_list = api_save_profiles(
-            user_uuid, st.session_state.profiles
-        )
-        if success and updated_profiles_list is not None:
-            st.session_state.profiles = updated_profiles_list
-            # 새로 추가된 프로필을 활성 상태로 설정하고 DB에 반영
-            if st.session_state.profiles:
-                newly_added_profile_id = st.session_state.profiles[-1]["id"]
-                api_update_user_main_profile_id(user_uuid, newly_added_profile_id)
-                _refresh_profiles_from_db()  # Refresh to reflect new active state
+
+    token = _get_auth_token()
+    if token:
+        success, response_data = backend_service.add_profile(token, new_profile_data)
+        if success:
             st.success("새 프로필이 추가되었습니다.")
+            st.session_state.isAddingProfile = False
+
+            # 새로 추가된 프로필을 활성 상태로 설정하고 DB에 반영
+            new_profile_id = response_data.get("id")
+            if new_profile_id:
+                set_main_ok, _ = backend_service.set_main_profile(token, new_profile_id)
+                if set_main_ok:
+                    _refresh_profiles_from_db()
+
         else:
-            st.error(f"프로필 추가 중 오류 발생: {message}")
+            st.error(f"프로필 추가 중 오류 발생: {response_data}")
         st.rerun()
 
 
@@ -152,22 +139,18 @@ def handle_save_edit(edited_data):
             "프로필 이름과 거주지는 필수 입력 항목입니다. 편집 내용을 확인해주세요."
         )
         return
-    edited_data["id"] = pid  # 🚨 id가 누락되지 않도록 명시적으로 추가
-    new_profiles = [
-        ({**p, **edited_data} if p["id"] == pid else p)
-        for p in st.session_state.profiles
-    ]
-    st.session_state.profiles = new_profiles
-    st.session_state.editingProfileId = None
-    st.session_state.editingData = {}
-    # 영구 저장
-    user_uuid = _get_user_id()
-    if user_uuid:
-        success, message, updated_profiles_list = api_save_profiles(
-            user_uuid, st.session_state.profiles
-        )
-        if success and updated_profiles_list is not None:
-            st.session_state.profiles = updated_profiles_list
+
+    token = _get_auth_token()
+    if token:
+        # isActive 필드는 백엔드에서 관리하므로 제거
+        update_payload = edited_data.copy()
+        update_payload.pop("isActive", None)
+        update_payload.pop("id", None)
+
+        success, message = backend_service.update_user_profile(token, pid, update_payload)
+        if success:
+            st.session_state.editingProfileId = None
+            st.session_state.editingData = {}
             _refresh_profiles_from_db()  # Refresh to ensure consistency
             st.success("프로필이 성공적으로 수정되었습니다.")
         else:
@@ -175,11 +158,9 @@ def handle_save_edit(edited_data):
         st.rerun()
 
 
-def _get_user_id() -> Optional[str]:
-    user_info = st.session_state.get("user_info", {})
-    if isinstance(user_info, dict):
-        return user_info.get("id")  # username 대신 UUID를 반환하도록 수정
-    return None
+def _get_auth_token() -> Optional[str]:
+    """세션에서 인증 토큰을 가져옵니다."""
+    return st.session_state.get("auth_token")
 
 
 def handle_cancel_edit():
@@ -198,9 +179,9 @@ def _get_user_main_profile_id() -> Optional[int]:
 
 def _refresh_profiles_from_db():
     """DB에서 최신 프로필 목록을 가져와 세션 상태를 업데이트합니다."""
-    user_uuid = _get_user_id()
-    if user_uuid:
-        ok, profiles_list = api_get_all_profiles_by_user_id(user_uuid)
+    token = _get_auth_token()
+    if token:
+        ok, profiles_list = backend_service.get_all_profiles(token)
         if ok and profiles_list:
             main_profile_id = _get_user_main_profile_id()
             for p in profiles_list:

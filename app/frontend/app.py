@@ -1,7 +1,7 @@
-"""의료 혜택 정보 제공 에이전트 챗봇 메인 애플리케이션 파일 11.12 수정"""
+"""의료 혜택 정보 제공 에이전트 챗봇 메인 애플리케이션 파일 11.13 수정"""
 
 import streamlit as st
-
+import requests
 from src.state_manger import initialize_session_state
 from src.pages.login import (
     initialize_auth_state,
@@ -20,6 +20,8 @@ from src.pages.settings import render_settings_modal
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# url = "http://localhost:5000"
 
 # ==============================================================================
 # 0. 전역 설정 및 CSS 주입
@@ -41,7 +43,7 @@ load_css("custom.css")
 # ==============================================================================
 
 initialize_session_state()
-# initialize_auth_state()
+initialize_auth_state()
 
 if "profiles" not in st.session_state:
     st.session_state.profiles = []

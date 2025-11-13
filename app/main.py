@@ -1,6 +1,7 @@
 """
 FastAPI 백엔드 메인 애플리케이션 파일입니다.
 라우터 등록 및 미들웨어 설정을 담당합니다.
+11.13 수정
 """
 
 from dotenv import load_dotenv
@@ -18,18 +19,18 @@ from app.api.v1 import chat, user
 
 
 # FastAPI 애플리케이션 초기화
-app = FastAPI(
-    title="Custom Welfare AI Backend",
-    description="Streamlit 앱을 위한 맞춤형 복지 AI LLM 및 DB 서비스 백엔드",
-    version="1.0.0",
-)
-
+# app = FastAPI(
+#     title="Custom Welfare AI Backend",
+#     description="Streamlit 앱을 위한 맞춤형 복지 AI LLM 및 DB 서비스 백엔드",
+#     version="1.0.0",
+# )
+app = FastAPI()
 # CORS 설정: Streamlit(프론트엔드)에서 백엔드 API 호출을 허용하기 위해 필수
 # 개발 환경에서는 모든 출처를 허용 (*), 실제 환경에서는 Streamlit 앱 URL로 제한해야 합니다.
 origins = [
     "*",  # 개발 환경에서 모든 출처 허용
     "http://localhost:8501",  # Streamlit 기본 포트
-    "http://127.0.0.1:8501",  # Streamlit 기본 포트
+    # "http://127.0.0.1:8501",  # Streamlit 기본 포트
 ]
 
 app.add_middleware(
@@ -59,4 +60,4 @@ if __name__ == "__main__":
     import uvicorn
 
     # 개발 서버 실행 (Streamlit이 이 서버를 호출합니다)
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

@@ -12,6 +12,7 @@ from app.schemas import (
     UserCreate,
     UserLogin,
     UserProfile,
+    UserProfileWithId,
     Token,
     TokenData,
     SuccessResponse,
@@ -130,10 +131,10 @@ async def login_user(user_data: UserLogin, db: Any = Depends(get_db)):
 # -----------------
 
 
-@router.get("/profile", response_model=User, summary="현재 사용자 프로필 조회")
+@router.get("/profile", response_model=User, summary="현재 사용자의 메인 프로필 조회")
 async def get_user_profile(current_user: dict = Depends(get_current_active_user)):
     """
-    인증된 사용자의 프로필 정보를 조회합니다.
+    인증된 사용자의 메인 프로필 정보를 조회합니다.
     """
     # get_current_active_user가 반환하는 dict를 User 스키마에 맞게 변환
     return User(
@@ -146,15 +147,15 @@ async def get_user_profile(current_user: dict = Depends(get_current_active_user)
     )
 
 
-@router.patch("/profile", response_model=SuccessResponse, summary="현재 사용자 프로필 수정")
+@router.patch("/profile/{profile_id}", response_model=SuccessResponse, summary="특정 프로필 수정")
 async def update_user_profile(
+    profile_id: int,
     update_data: UserProfile,
     current_user: dict = Depends(get_current_active_user),
 ):
     """
-    인증된 사용자의 프로필 정보를 수정합니다.
+    인증된 사용자의 특정 프로필 정보를 수정합니다.
     """
-    profile_id = current_user.get("main_profile_id")
     if not profile_id:
         raise HTTPException(status_code=404, detail="메인 프로필을 찾을 수 없습니다.")
 
@@ -169,6 +170,62 @@ async def update_user_profile(
     else:
         raise HTTPException(status_code=500, detail="프로필 수정에 실패했습니다.")
 
+
+@router.get("/profiles", response_model=List[UserProfileWithId], summary="모든 프로필 조회")
+async def get_all_user_profiles(current_user: dict = Depends(get_current_active_user)):
+    """
+    인증된 사용자의 모든 프로필 목록을 조회합니다.
+    """
+    user_uuid = current_user.get("user_uuid")
+    ok, profiles = db_ops.get_all_profiles_by_user_id(user_uuid)
+    if not ok:
+        raise HTTPException(status_code=500, detail="프로필 목록을 가져오는 데 실패했습니다.")
+    return profiles
+
+
+@router.post("/profile", response_model=UserProfileWithId, status_code=status.HTTP_201_CREATED, summary="새 프로필 추가")
+async def add_new_profile(
+    profile_data: UserProfile,
+    current_user: dict = Depends(get_current_active_user),
+):
+    """
+    인증된 사용자에게 새 프로필을 추가합니다.
+    """
+    user_uuid = current_user.get("user_uuid")
+    ok, new_profile_id = db_ops.add_profile(user_uuid, profile_data.model_dump())
+    if not ok:
+        raise HTTPException(status_code=500, detail="프로필 추가에 실패했습니다.")
+    
+    # 추가된 프로필 정보를 다시 조회하여 반환
+    # 이 부분은 간단하게 입력받은 데이터에 id만 추가하여 반환할 수도 있습니다.
+    return UserProfileWithId(id=new_profile_id, **profile_data.model_dump())
+
+
+@router.delete("/profile/{profile_id}", response_model=SuccessResponse, summary="특정 프로필 삭제")
+async def delete_user_profile(
+    profile_id: int,
+    current_user: dict = Depends(get_current_active_user),
+):
+    """
+    인증된 사용자의 특정 프로필을 삭제합니다.
+    """
+    if db_ops.delete_profile_by_id(profile_id):
+        return SuccessResponse(message="프로필이 성공적으로 삭제되었습니다.")
+    else:
+        raise HTTPException(status_code=500, detail="프로필 삭제에 실패했습니다.")
+
+
+@router.put("/profile/main/{profile_id}", response_model=SuccessResponse, summary="메인 프로필 변경")
+async def set_main_profile(
+    profile_id: int,
+    current_user: dict = Depends(get_current_active_user),
+):
+    """사용자의 메인 프로필을 변경합니다."""
+    user_uuid = current_user.get("user_uuid")
+    ok, msg = db_ops.update_user_main_profile_id(user_uuid, profile_id)
+    if not ok:
+        raise HTTPException(status_code=500, detail=msg)
+    return SuccessResponse(message=msg)
 
 @router.delete("/delete", response_model=SuccessResponse, summary="현재 사용자 계정 삭제")
 async def delete_user_account(

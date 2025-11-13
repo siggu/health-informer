@@ -1,7 +1,8 @@
+"""Pydantic 스키마 정의 파일입니다.
+사용자, 인증, 프로필 등 다양한 데이터 구조를 정의합니다. 11.13 수정"""
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
-
 
 # ==============================================================================
 # 인증 및 토큰 관련 스키마
@@ -50,6 +51,7 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
 
+
 class UserLogin(BaseModel):
     email: str
     password: str
@@ -70,6 +72,12 @@ class UserProfile(BaseModel):
     isActive: Optional[bool] = None
 
 
+class UserProfileWithId(UserProfile):
+    """DB에서 조회 시 사용, 프로필 ID 포함"""
+
+    id: int
+
+
 class User(UserBase):
     id: int
     created_at: datetime
@@ -77,4 +85,6 @@ class User(UserBase):
     profile: Optional[UserProfile] = None
 
     class Config:
-        from_attributes = True  # orm_mode = True는 Pydantic v2에서 from_attributes로 변경됨
+        from_attributes = (
+            True  # orm_mode = True는 Pydantic v2에서 from_attributes로 변경됨
+        )

@@ -1,8 +1,9 @@
+"""설정 페이지 관련 함수들 11.13 수정"""
 import uuid
 import time
 import streamlit as st
-
-from ..backend_service import api_delete_user_account, api_reset_password
+from typing import Optional
+from ..backend_service import backend_service
 from ..utils.session_manager import clear_session
 
 
@@ -28,6 +29,11 @@ def initialize_settings_state():
         st.session_state.password_error = ""
 
 
+def _get_auth_token() -> Optional[str]:
+    """세션에서 인증 토큰을 가져옵니다."""
+    return st.session_state.get("auth_token")
+
+
 def handle_font_size_change(size):
     st.session_state.font_size = size
     st.success(f"글자 크기가 '{size}로 설정되었습니다.")
@@ -49,15 +55,12 @@ def handle_password_reset():
         st.session_state.password_error = "비밀번호는 8자 이상이어야 합니다."
         return
 
-    user_uuid = None
-    user_info = st.session_state.get("user_info", {})
-    if isinstance(user_info, dict):
-        user_uuid = user_info.get("id")  # 🚨 userId(username) 대신 id(UUID)를 사용
-    if not user_uuid:
+    token = _get_auth_token()
+    if not token:
         st.session_state.password_error = "로그인 정보를 찾을 수 없습니다."
         return
 
-    success, message = api_reset_password(user_uuid, data["current"], data["new"])
+    success, message = backend_service.reset_password(token, data["current"], data["new"])
 
     if success:
         st.success(f"🔒 {message}")
@@ -79,19 +82,13 @@ def toggle_delete_confirm(value):
 
 
 def handle_account_delete():
-    user_uuid = None
-    user_info = st.session_state.get("user_info", {})
-
-    if not user_info or not isinstance(user_info, dict) or not user_info.get("id"):
+    token = _get_auth_token()
+    if not token:
         st.error("계정 정보를 찾을 수 없습니다.")
         st.stop()  # 추가: 오류 발생 시 실행 중단
         return
 
-    # 'id' (UUID)만 사용하도록 수정
-    user_uuid = user_info.get("id")
-
-    # 새로 추가된 backend_service의 함수를 호출
-    success, message = api_delete_user_account(user_uuid)
+    success, message = backend_service.delete_user_account(token)
     if success:
         st.success(f"🗑️ {message}")
         st.session_state.settings_modal_open = False

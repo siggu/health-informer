@@ -1,4 +1,4 @@
-"""템플릿 로더 유틸리티"""
+"""템플릿 로더 유틸리티 함수들 11.13 수정"""
 import os
 import streamlit as st
 import logging

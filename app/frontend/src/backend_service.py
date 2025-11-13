@@ -1,6 +1,7 @@
 """
 Streamlit UI와 FastAPI 백엔드 API 간의 통신을 담당하는 서비스 계층입니다.
 DB나 LLM 로직을 직접 처리하지 않고, 모두 HTTP 요청을 통해 FastAPI 서버에 위임합니다.
+11.13 수정
 """
 
 import os
@@ -143,11 +144,33 @@ class BackendService:
         except requests.exceptions.RequestException as e:
             return False, f"프로필 조회 실패: {e}"
 
+    def get_all_profiles(self, token: str) -> Tuple[bool, Any]:
+        """인증된 사용자의 모든 프로필 목록을 가져옵니다."""
+        url = f"{FASTAPI_BASE_URL}/api/v1/user/profiles"
+        headers = {"Authorization": f"Bearer {token}"}
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            return True, response.json()
+        except requests.exceptions.RequestException as e:
+            return False, f"전체 프로필 조회 실패: {e}"
+
+    def add_profile(self, token: str, profile_data: Dict[str, Any]) -> Tuple[bool, Any]:
+        """새로운 프로필을 추가합니다."""
+        url = f"{FASTAPI_BASE_URL}/api/v1/user/profile"
+        headers = {"Authorization": f"Bearer {token}"}
+        try:
+            response = requests.post(url, json=profile_data, headers=headers, timeout=10)
+            response.raise_for_status()
+            return True, response.json()
+        except requests.exceptions.RequestException as e:
+            return False, f"프로필 추가 실패: {e}"
+
     def update_user_profile(
-        self, token: str, update_data: Dict[str, Any]
+        self, token: str, profile_id: int, update_data: Dict[str, Any]
     ) -> Tuple[bool, str]:
         """사용자 프로필을 수정합니다."""
-        url = f"{FASTAPI_BASE_URL}/api/v1/user/profile"
+        url = f"{FASTAPI_BASE_URL}/api/v1/user/profile/{profile_id}"
         headers = {"Authorization": f"Bearer {token}"}
         try:
             response = requests.patch(url, json=update_data, headers=headers, timeout=10)
@@ -155,6 +178,28 @@ class BackendService:
             return True, response.json().get("message", "성공적으로 수정되었습니다.")
         except requests.exceptions.RequestException as e:
             return False, f"프로필 수정 실패: {e}"
+
+    def delete_profile(self, token: str, profile_id: int) -> Tuple[bool, str]:
+        """특정 프로필을 삭제합니다."""
+        url = f"{FASTAPI_BASE_URL}/api/v1/user/profile/{profile_id}"
+        headers = {"Authorization": f"Bearer {token}"}
+        try:
+            response = requests.delete(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            return True, response.json().get("message", "성공적으로 삭제되었습니다.")
+        except requests.exceptions.RequestException as e:
+            return False, f"프로필 삭제 실패: {e}"
+
+    def set_main_profile(self, token: str, profile_id: int) -> Tuple[bool, str]:
+        """메인 프로필을 변경합니다."""
+        url = f"{FASTAPI_BASE_URL}/api/v1/user/profile/main/{profile_id}"
+        headers = {"Authorization": f"Bearer {token}"}
+        try:
+            response = requests.put(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            return True, response.json().get("message", "메인 프로필이 변경되었습니다.")
+        except requests.exceptions.RequestException as e:
+            return False, f"메인 프로필 변경 실패: {e}"
 
     def delete_user_account(self, token: str) -> Tuple[bool, str]:
         """사용자 계정을 삭제합니다."""

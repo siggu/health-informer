@@ -1,11 +1,11 @@
-"""채팅 렌더링/메시지 전송/정책 카드 파싱 11.11수정"""
+"""채팅 렌더링/메시지 전송/정책 카드 파싱 11.13수정"""
 
 import uuid
 import time
 import streamlit as st
 from src.widgets.policy_card import render_policy_card
 from src.utils.template_loader import render_template, load_css
-from src.backend_service import get_llm_manager
+from src.backend_service import backend_service
 
 
 SUGGESTED_QUESTIONS = [
@@ -45,11 +45,10 @@ def handle_send_message(message: str):
     )
 
     try:
-        llm_manager = get_llm_manager()
         with st.spinner("답변 생성중..."):
             placeholder = st.empty()
             collected = ""
-            for delta in llm_manager.generate_response_stream(
+            for delta in backend_service.get_llm_response_stream(
                 history_messages=st.session_state.get("messages", []),
                 user_message=message,
                 active_profile=active_profile,

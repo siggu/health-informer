@@ -1,4 +1,4 @@
-"""앱 전역 상태 관리를 위한 session_state 초기화 및 관리 함수들"""
+"""앱 전역 상태 관리를 위한 session_state 초기화 및 관리 함수들 11.13 수정"""
 import streamlit as st
 import uuid
 import time
