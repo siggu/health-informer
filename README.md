@@ -1,0 +1,1 @@
+![picture](http://dev.wyhil.com:43000/SG-OHA-2025-TEAM-02/HealthInformer/src/branch/main/Pipeline-2025-11-12-082233.png)
