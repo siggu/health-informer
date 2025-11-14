@@ -200,13 +200,18 @@ class DistrictMenuCrawler(DistrictCrawler):
         print(f"\n[1.1단계] {self.district_name} Strategy로 링크 수집...")
         all_links = self._collect_links_from_menu(soup, base_url)
 
+        # 블랙리스트 필터링 적용 (1차 - 중복 제거 전)
+        if enable_keyword_filter and self.blacklist_keywords:
+            print(f"\n[1.2단계] {self.district_name} 블랙리스트 필터링 적용 (1차)...")
+            all_links = self._apply_blacklist_filter(all_links)
+
         # 중복 URL 제거 (구체성 기준)
-        print("\n[1.2단계] 중복 URL 제거 (구체적인 제목 우선)...")
+        print("\n[1.3단계] 중복 URL 제거 (구체적인 제목 우선)...")
         all_links = self._deduplicate_by_specificity(all_links)
 
-        # 블랙리스트 필터링 적용
+        # 블랙리스트 필터링 적용 (2차 - 중복 제거 후)
         if enable_keyword_filter and self.blacklist_keywords:
-            print(f"\n[1.3단계] {self.district_name} 블랙리스트 필터링 적용...")
+            print(f"\n[1.4단계] {self.district_name} 블랙리스트 필터링 적용 (2차)...")
             all_links = self._apply_blacklist_filter(all_links)
 
         # depth_level 필드 제거 (이후 처리에서 필요 없음)

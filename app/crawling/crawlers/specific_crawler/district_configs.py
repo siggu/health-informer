@@ -8,8 +8,12 @@ from typing import Dict, Any
 from .strategies import (
     EPStrategy,
     GangdongStrategy,
+    GwanakStrategy,
+    DDMStrategy,
     JongnoStrategy,
     JungnangStrategy,
+    JungguStrategy,
+    SDStrategy,
     YDPStrategy,
     YongsanStrategy,
 )
@@ -55,6 +59,7 @@ GLOBAL_BLACKLIST_KEYWORDS = {
     "영·유아 손상기록시스템",
 }
 
+MAX_WORKERS_DEFAULT = 4
 
 # =============================================================================
 # 구별 설정 (Strategy Pattern)
@@ -64,43 +69,70 @@ DISTRICT_CONFIGS: Dict[str, Dict[str, Any]] = {
         "strategy_class": EPStrategy,
         "filter_text": "사업안내",
         "output_dir": "app/crawling/output/은평구",
-        "max_workers": 4,
+        "max_workers": MAX_WORKERS_DEFAULT,
         "depth_scores": {2: 5000, 3: 10000, 4: 20000},  # 구체성 점수
     },
     "강동구": {
         "strategy_class": GangdongStrategy,
         "filter_text": "보건사업",
         "output_dir": "app/crawling/output/강동구",
-        "max_workers": 4,
+        "max_workers": MAX_WORKERS_DEFAULT,
+        "depth_scores": {1: 5000, 2: 10000, 3: 20000},
+    },
+    "관악구": {
+        "strategy_class": GwanakStrategy,
+        "output_dir": "app/crawling/output/관악구",
+        "max_workers": MAX_WORKERS_DEFAULT,
+        "depth_scores": {1: 5000, 2: 10000},
+    },
+    "동대문구": {
+        "strategy_class": DDMStrategy,
+        "filter_text": "보건사업",
+        "output_dir": "app/crawling/output/동대문구",
+        "max_workers": MAX_WORKERS_DEFAULT,
         "depth_scores": {1: 5000, 2: 10000, 3: 20000},
     },
     "종로구": {
         "strategy_class": JongnoStrategy,
         "filter_text": None,
         "output_dir": "app/crawling/output/종로구",
-        "max_workers": 4,
+        "max_workers": MAX_WORKERS_DEFAULT,
         "depth_scores": {1: 5000, 2: 10000},
     },
     "중랑구": {
         "strategy_class": JungnangStrategy,
         "filter_text": None,
         "output_dir": "app/crawling/output/중랑구",
-        "max_workers": 4,
+        "max_workers": MAX_WORKERS_DEFAULT,
         "depth_scores": {1: 5000, 2: 10000, 3: 20000},
+    },
+    "성동구": {
+        "strategy_class": SDStrategy,
+        "filter_text": "보건사업",
+        "output_dir": "app/crawling/output/성동구",
+        "max_workers": MAX_WORKERS_DEFAULT,
+        "depth_scores": {2: 5000, 3: 10000, 4: 20000},
     },
     "영등포구": {
         "strategy_class": YDPStrategy,
         "filter_text": None,
         "output_dir": "app/crawling/output/영등포구",
-        "max_workers": 4,
+        "max_workers": MAX_WORKERS_DEFAULT,
         "depth_scores": {1: 1000, 2: 5000, 3: 10000},
     },
     "용산구": {
         "strategy_class": YongsanStrategy,
         "filter_text": None,
         "output_dir": "app/crawling/output/용산구",
-        "max_workers": 4,
+        "max_workers": MAX_WORKERS_DEFAULT,
         "depth_scores": {1: 5000, 2: 10000},
+    },
+    "중구": {
+        "strategy_class": JungguStrategy,
+        "filter_text": None,
+        "output_dir": "app/crawling/output/중구",
+        "max_workers": MAX_WORKERS_DEFAULT,
+        "depth_scores": {1: 5000},
     },
 }
 

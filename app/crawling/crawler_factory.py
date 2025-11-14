@@ -20,6 +20,7 @@ from app.crawling.crawlers.specific_crawler.district_menu_crawler import (
 )
 from app.crawling.crawlers.specific_crawler.songpa_crawler import SongpaCrawler
 from app.crawling.crawlers.specific_crawler.yangcheon_crawler import YangcheonCrawler
+from app.crawling.crawlers.specific_crawler.mapo_crawler import MapoCrawler
 from app.crawling.crawlers.specific_crawler.ehealth_crawler import EHealthCrawler
 from app.crawling.crawlers.specific_crawler.welfare_crawler import WelfareCrawler
 from app.crawling import utils
@@ -87,8 +88,28 @@ def get_crawler_for_url(
             max_workers=max_workers,
         )
 
-    # 3. 통합 메뉴 크롤러 (6개 구)
-    if region_name in ["은평구", "강동구", "종로구", "중랑구", "영등포구", "용산구"]:
+    if "mapo" in url_lower or "마포" in (region_name or ""):
+        print("[Crawler Factory] 마포구 크롤러 선택")
+        return MapoCrawler(
+            start_url=url,
+            output_dir=output_dir or "app/crawling/output/마포구",
+            max_workers=max_workers,
+        )
+
+    # 3. 통합 메뉴 크롤러
+    if region_name in [
+        "은평구",
+        "강동구",
+        "관악구",
+        "동대문구",
+        "종로구",
+        "중랑구",
+        "중구",
+        "성동구",
+        "영등포구",
+        "용산구",
+        # "서초구",
+    ]:
         print(f"[Crawler Factory] {region_name} 통합 메뉴 크롤러 선택")
         return DistrictMenuCrawler(
             district_name=region_name,

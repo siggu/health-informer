@@ -32,7 +32,9 @@ class GangdongStrategy(BaseMenuStrategy):
             for li in all_menu_items:
                 link = li.select_one("a.gnb-category")
                 if link and self.filter_text in link.get_text(strip=True):
-                    print(f"  [강동구] '{self.filter_text}' 메뉴 발견, 해당 섹션만 수집")
+                    print(
+                        f"  [강동구] '{self.filter_text}' 메뉴 발견, 해당 섹션만 수집"
+                    )
                     container = li
                     break
 
@@ -45,18 +47,14 @@ class GangdongStrategy(BaseMenuStrategy):
                 url = urljoin(base_url, href)
                 collected_links.append(self._make_link_dict(name, url, 1))
 
-        # Step 4: depth2 링크 수집 (하위에 depth3이 없는 것만)
-        depth2_containers = container.select("ul.depth-02 > li")
-        for li in depth2_containers:
-            has_depth3 = li.select_one("ul.depth-03") is not None
-            if not has_depth3:
-                a_tag = li.find("a", recursive=False)
-                if a_tag:
-                    href = a_tag.get("href", "")
-                    if self._is_valid_href(href):
-                        name = self._extract_text(a_tag)
-                        url = urljoin(base_url, href)
-                        collected_links.append(self._make_link_dict(name, url, 2))
+        # Step 4: depth2 링크 수집
+        depth2_elements = container.select("ul.depth-02 > li > a")
+        for element in depth2_elements:
+            href = element.get("href", "")
+            if self._is_valid_href(href):
+                name = self._extract_text(element)
+                url = urljoin(base_url, href)
+                collected_links.append(self._make_link_dict(name, url, 2))
 
         # Step 5: depth3 링크 수집
         depth3_elements = container.select("ul.depth-03 > li > a")

@@ -15,7 +15,7 @@ class JongnoStrategy(BaseMenuStrategy):
     def collect_links(self, soup: BeautifulSoup, base_url: str) -> List[Dict]:
         """
         종로구 LNB 구조에서 링크 수집
-        depth1, depth2를 수집
+        depth2가 있으면 depth2만, 없으면 depth1 수집
         """
         collected_links = []
 
@@ -27,14 +27,21 @@ class JongnoStrategy(BaseMenuStrategy):
 
         print("  [종로구] .lnb-wrap 발견")
 
-        # Step 2: depth1 링크 수집
-        depth1_elements = lnb_wrap.select(".lnb-depth1 > li > a.btn.btn-toggle")
-        for element in depth1_elements:
-            href = element.get("href", "")
-            if self._is_valid_href(href):
-                name = self._extract_text(element, from_span=True)
-                url = urljoin(base_url, href)
-                collected_links.append(self._make_link_dict(name, url, 1))
+        # Step 2: depth1 li 항목 순회
+        depth1_items = lnb_wrap.select(".lnb-depth1 > li")
+        for item in depth1_items:
+            # depth2가 있는지 확인
+            has_depth2 = item.select_one("ul.lnb-depth2") is not None
+
+            if not has_depth2:
+                # depth2가 없으면 depth1 링크 수집
+                depth1_link = item.select_one("a.btn.btn-toggle")
+                if depth1_link:
+                    href = depth1_link.get("href", "")
+                    if self._is_valid_href(href):
+                        name = self._extract_text(depth1_link, from_span=True)
+                        url = urljoin(base_url, href)
+                        collected_links.append(self._make_link_dict(name, url, 1))
 
         # Step 3: depth2 링크 수집
         depth2_elements = lnb_wrap.select(".lnb-depth2 > li > a.btn")

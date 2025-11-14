@@ -36,18 +36,14 @@ class JungnangStrategy(BaseMenuStrategy):
                 url = urljoin(base_url, href)
                 collected_links.append(self._make_link_dict(name, url, 1))
 
-        # Step 3: depth2 링크 수집 (하위에 sb-depth4가 없는 것만)
-        depth2_containers = sub_menu.select("ul.sb-depth3 > li")
-        for li in depth2_containers:
-            has_depth4 = li.select_one("ul.sb-depth4") is not None
-            if not has_depth4:
-                a_tag = li.find("a", recursive=False)
-                if a_tag:
-                    href = a_tag.get("href", "")
-                    if self._is_valid_href(href):
-                        name = self._extract_text(a_tag)
-                        url = urljoin(base_url, href)
-                        collected_links.append(self._make_link_dict(name, url, 2))
+        # Step 3: depth2 링크 수집
+        depth2_elements = sub_menu.select("ul.sb-depth3 > li > a")
+        for element in depth2_elements:
+            href = element.get("href", "")
+            if self._is_valid_href(href):
+                name = self._extract_text(element)
+                url = urljoin(base_url, href)
+                collected_links.append(self._make_link_dict(name, url, 2))
 
         # Step 4: depth3 링크 수집 (ul.sb-depth4 > li > a)
         depth3_elements = sub_menu.select("ul.sb-depth4 > li > a")
