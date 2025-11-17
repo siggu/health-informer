@@ -43,6 +43,7 @@ def extract_region_from_url(url: str) -> str:
         "yangcheon": "양천구",
         "ep": "은평구",
         "ydp": "영등포구",
+        "jungnang": "중랑구",
         "seoul-agi": "서울시",
         "wis.seoul": "서울시",
         "e-health": "전국",
