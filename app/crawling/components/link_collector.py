@@ -12,10 +12,10 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-import config
-import utils
-from utils import extract_link_from_element
-from base.base_crawler import BaseCrawler
+from app.crawling import config
+from app.crawling import utils
+from app.crawling.utils import extract_link_from_element, normalize_url
+from app.crawling.base.base_crawler import BaseCrawler
 
 
 class LinkCollector(BaseCrawler):
@@ -163,7 +163,7 @@ class LinkCollector(BaseCrawler):
                     link_element, base_url, seen_urls
                 )
                 if link_info:
-                    seen_urls.add(link_info["url"])
+                    seen_urls.add(normalize_url(link_info["url"]))
                     collected_links.append(link_info)
 
         print(f"  [OK] 총 {len(collected_links)}개 링크 수집 (single_page, 중복 제거)")
@@ -209,7 +209,7 @@ class LinkCollector(BaseCrawler):
                     link_element, base_url, seen_urls
                 )
                 if link_info:
-                    seen_urls.add(link_info["url"])
+                    seen_urls.add(normalize_url(link_info["url"]))
                     collected_links.append(link_info)
 
         return collected_links
@@ -246,7 +246,8 @@ class LinkCollector(BaseCrawler):
 
         # 각 카테고리 방문하여 하위 메뉴 수집
         for category in main_categories:
-            if category["url"] in seen_urls:
+            normalized_cat_url = normalize_url(category["url"])
+            if normalized_cat_url in seen_urls:
                 print(f"\n  LNB 하위 탐색 건너뜀 (이미 처리됨): {category['name']}")
                 continue
 
@@ -263,13 +264,14 @@ class LinkCollector(BaseCrawler):
                 if sub_links:
                     print(f"    -> 하위 메뉴 {len(sub_links)}개 발견")
                     for link_info in sub_links:
-                        if link_info["url"] not in seen_urls:
-                            seen_urls.add(link_info["url"])
+                        normalized_url = normalize_url(link_info["url"])
+                        if normalized_url not in seen_urls:
+                            seen_urls.add(normalized_url)
                             collected_links.append(link_info)
                 else:
                     print("    -> 하위 메뉴 없음 (또는 sub_selector 없음), 카테고리 자체 추가")
-                    if category["url"] not in seen_urls:
-                        seen_urls.add(category["url"])
+                    if normalized_cat_url not in seen_urls:
+                        seen_urls.add(normalized_cat_url)
                         collected_links.append(category)
 
             except requests.RequestException as e:
@@ -312,14 +314,14 @@ class LinkCollector(BaseCrawler):
                 link_element, base_url, seen_urls
             )
             if link_info:
-                seen_urls.add(link_info["url"])
+                seen_urls.add(normalize_url(link_info["url"]))
                 extracted_links.append(link_info)
 
         return extracted_links
 
     def _deduplicate_links(self, links: List[Dict]) -> List[Dict]:
         """
-        링크 목록 중복 제거
+        링크 목록 중복 제거 (정규화된 URL 기준)
 
         Args:
             links: 링크 목록
@@ -331,8 +333,9 @@ class LinkCollector(BaseCrawler):
         final_seen_urls = set()
 
         for link in links:
-            if link["url"] not in final_seen_urls:
+            normalized_url = normalize_url(link["url"])
+            if normalized_url not in final_seen_urls:
                 final_links.append(link)
-                final_seen_urls.add(link["url"])
+                final_seen_urls.add(normalized_url)
 
         return final_links
