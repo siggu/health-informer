@@ -135,7 +135,8 @@ except Exception:
 # 4) retrieval_planner
 try:
     from app.langgraph.nodes.retrieval_planner import plan as retrieval_planner_node
-except Exception:
+except Exception as e:
+    print(f"[service_graph] retrieval_planner import failed: {e}")
     def retrieval_planner_node(state: State) -> Dict[str, Any]:
         # 더미 RAG 스니펫 1개
         snippets: list[RagSnippet] = [{
@@ -181,7 +182,7 @@ except Exception:
 
 # 6) answer_llm
 try:
-    from app.langgraph.nodes.answer_llm import answer as answer_llm_node
+    from app.langgraph.nodes.llm_answer_creator import answer as answer_llm_node
 except Exception:
     def answer_llm_node(state: State) -> Dict[str, Any]:
         ui = state.get("user_input") or ""

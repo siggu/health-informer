@@ -89,13 +89,15 @@ class PersistResult(TypedDict, total=False):
     warnings: List[str]
 
 
-def _append_tool(msgs: List[Message], text: str, meta: Optional[Dict[str, Any]] = None):
-    msgs.append({
+def _append_tool(msgs: List[Message], text: str, meta: Optional[Dict[str, Any]] = None) -> Message:
+    msg: Message = {
         "role": "tool",
         "content": text,
         "created_at": _now_iso(),
         "meta": meta or {},
-    })
+    }
+    msgs.append(msg)
+    return msg
 
 def _parse_median_income_ratio(raw: Any) -> Optional[float]:
     if raw is None:
@@ -346,7 +348,7 @@ def persist(
     # DB URL 없으면 DB 작업을 스킵하고 로그만 남김
     if not DB_URL:
         msgs: List[Message] = list(state.get("messages") or [])
-        _append_tool(msgs, "[persist_pipeline] DATABASE_URL not set; skipping DB upsert")
+        log_msg = _append_tool(msgs, "[persist_pipeline] DATABASE_URL not set; skipping DB upsert")
         result: PersistResult = {
             "ok": False,
             "conversation_id": None,
@@ -354,7 +356,7 @@ def persist(
             "warnings": ["DATABASE_URL not set"],
         }
         return {
-            "messages": msgs,
+            "messages": [log_msg],
             "persist_result": result,
             "rolling_summary": state.get("rolling_summary"),
         }
@@ -375,12 +377,15 @@ def persist(
         mode=_mode,
         no_store_policy=_no_store,
     )
+    log_messages: List[Message] = []
 
     # 이후 로그는 cleaned에 직접 append (재클린 없음)
-    _append_tool(
-        cleaned,
-        "[persist_pipeline] cleaner applied",
-        {"enable": _enable, "mode": _mode, "no_store_policy": _no_store},
+    log_messages.append(
+        _append_tool(
+            cleaned,
+            "[persist_pipeline] cleaner applied",
+            {"enable": _enable, "mode": _mode, "no_store_policy": _no_store},
+        )
     )
 
     # 3) 최종 요약 생성
@@ -408,7 +413,9 @@ def persist(
                     merged_profile = merge_result.get("merged_profile")
                     merged_collection = merge_result.get("merged_collection")
                     merge_log = merge_result.get("merge_log") or []
-                    _append_tool(cleaned, "[persist_pipeline] diff_merge completed", {"log": merge_log})
+                    log_messages.append(
+                        _append_tool(cleaned, "[persist_pipeline] diff_merge completed", {"log": merge_log})
+                    )
 
                     # profiles upsert
                     if merged_profile is not None:
@@ -422,7 +429,9 @@ def persist(
 
                 else:
                     warnings.append("profile_id is None; skip profile/collection upsert")
-                    _append_tool(cleaned, "[persist_pipeline] no profile_id; skip profile/collection")
+                    log_messages.append(
+                        _append_tool(cleaned, "[persist_pipeline] no profile_id; skip profile/collection")
+                    )
 
                 # 5-2) conversations upsert
                 summary_obj: Dict[str, Any] = {"text": final_summary}
@@ -448,7 +457,9 @@ def persist(
 
     except Exception as e:
         warnings.append(f"DB error: {e}")
-        _append_tool(cleaned, "[persist_pipeline] DB error; rollback", {"error": str(e)})
+        log_messages.append(
+            _append_tool(cleaned, "[persist_pipeline] DB error; rollback", {"error": str(e)})
+        )
 
     # 6) 결과 리턴
     result: PersistResult = {
@@ -458,14 +469,21 @@ def persist(
         "warnings": warnings,
     }
 
-    _append_tool(
-        cleaned,
-        "[persist_pipeline] done",
-        {"conversation_id": conversation_id, "warnings": warnings},
+    log_messages.append(
+        _append_tool(
+            cleaned,
+            "[persist_pipeline] done",
+            {
+                "ok": result["ok"],
+                "conversation_id": conversation_id,
+                "counts": result["counts"],
+                "warnings": warnings,
+            },
+        )
     )
 
     return {
-        "messages": cleaned,
+        "messages": log_messages,
         "persist_result": result,
         "rolling_summary": final_summary,
         "profile_id": profile_id,
