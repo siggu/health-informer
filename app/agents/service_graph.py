@@ -181,14 +181,18 @@ except Exception:
         }
 
 # 6) answer_llm
+# 6) answer_llm
 try:
-    from app.langgraph.nodes.llm_answer_creator import answer as answer_llm_node
-except Exception:
+    from app.langgraph.nodes.llm_answer_creator import answer_llm_node
+    print("[service_graph] answer_llm_node import SUCCESS")
+except Exception as e:
+    print("[service_graph] answer_llm_node import FAILED:", e)
+
     def answer_llm_node(state: State) -> Dict[str, Any]:
         ui = state.get("user_input") or ""
         ans = f"(더미 응답) 질문을 받았어요: {ui[:60]}"
         return {
-            "answer": ans,
+            "answer": {"text": ans},
             "messages": [{
                 "role": "assistant",
                 "content": ans,
@@ -196,6 +200,7 @@ except Exception:
                 "meta": {},
             }],
         }
+
 
 # 7) persist_pipeline
 try:
