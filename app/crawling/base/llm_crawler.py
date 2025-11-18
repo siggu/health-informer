@@ -23,7 +23,7 @@ import re
 
 load_dotenv()
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from base.base_crawler import BaseCrawler
+from app.crawling.base.base_crawler import BaseCrawler
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -38,8 +38,12 @@ class HealthSupportInfo(BaseModel):
     source_url: Optional[str] = Field(default=None, description="출처 URL")
     region: Optional[str] = Field(default=None, description="지역명 (예: 광진구, 전국)")
     # 평가 점수(요약만 기반)
-    eval_target: Optional[int] = Field(default=None, ge=0, le=10, description="지원대상 단일 종합 점수(1~10)")
-    eval_content: Optional[int] = Field(default=None, ge=0, le=10, description="지원내용 단일 종합 점수(0~10)")
+    eval_target: Optional[int] = Field(
+        default=None, ge=0, le=10, description="지원대상 단일 종합 점수(1~10)"
+    )
+    eval_content: Optional[int] = Field(
+        default=None, ge=0, le=10, description="지원내용 단일 종합 점수(0~10)"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -84,20 +88,46 @@ class LLMStructuredCrawler(BaseCrawler):
             print(f"파일 읽기 실패: {e}")
             return None
 
-    def _extract_text_content(self, soup: BeautifulSoup, max_chars: int = 200000) -> str:
+    def _extract_text_content(
+        self, soup: BeautifulSoup, max_chars: int = 200000
+    ) -> str:
         soup_copy = BeautifulSoup(str(soup), "html.parser")
         for selector in [
-            "nav","header","footer",".sidebar",".menu",".navigation",
-            "#nav","#header","#footer",".ad",".advertisement",
-            "script","style","noscript",".cookie-banner",".popup",
+            "nav",
+            "header",
+            "footer",
+            ".sidebar",
+            ".menu",
+            ".navigation",
+            "#nav",
+            "#header",
+            "#footer",
+            ".ad",
+            ".advertisement",
+            "script",
+            "style",
+            "noscript",
+            ".cookie-banner",
+            ".popup",
         ]:
             for el in soup_copy.select(selector):
                 el.decompose()
 
         content_area = None
         for selector in [
-            "main","#content","#main",".content",".main-content",
-            ".contentArea",".content-area","article",".article","[role='main']",
+            "main",
+            "#content",
+            "#main",
+            ".content",
+            ".main-content",
+            ".contentArea",
+            ".content-area",
+            "article",
+            ".article",
+            "[role='main']",
+            ".s_con_right",
+            ".content-container",
+            "sub-right",
         ]:
             content_area = soup_copy.select_one(selector)
             if content_area:
@@ -108,13 +138,21 @@ class LLMStructuredCrawler(BaseCrawler):
         text_parts = []
         for table in content_area.find_all("table"):
             table_lines = ["[표 시작]"]
-            headers = [th.get_text(strip=True) for th in table.find_all("th") if th.get_text(strip=True)]
+            headers = [
+                th.get_text(strip=True)
+                for th in table.find_all("th")
+                if th.get_text(strip=True)
+            ]
             if headers:
                 header_line = " | ".join(headers)
                 table_lines.append(header_line)
                 table_lines.append("-" * len(header_line))
             for row in table.find_all("tr"):
-                cells = [cell.get_text(strip=True) for cell in row.find_all(["td","th"]) if cell.get_text(strip=True)]
+                cells = [
+                    cell.get_text(strip=True)
+                    for cell in row.find_all(["td", "th"])
+                    if cell.get_text(strip=True)
+                ]
                 if cells:
                     table_lines.append(" | ".join(cells))
             table_lines.append("[표 끝]\n")
@@ -124,10 +162,16 @@ class LLMStructuredCrawler(BaseCrawler):
         text = content_area.get_text(separator="\n", strip=True)
         lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
         general_text = "\n".join(lines)
-        cleaned_text = general_text + ("\n\n" + "\n\n".join(text_parts) if text_parts else "")
+        cleaned_text = general_text + (
+            "\n\n" + "\n\n".join(text_parts) if text_parts else ""
+        )
         if len(cleaned_text) > max_chars:
-            print(f"    ⚠️ 텍스트가 너무 깁니다 ({len(cleaned_text):,}자). {max_chars:,}자로 자릅니다.")
-            cleaned_text = cleaned_text[:max_chars] + "\n\n[... 텍스트가 잘렸습니다 ...]"
+            print(
+                f"    ⚠️ 텍스트가 너무 깁니다 ({len(cleaned_text):,}자). {max_chars:,}자로 자릅니다."
+            )
+            cleaned_text = (
+                cleaned_text[:max_chars] + "\n\n[... 텍스트가 잘렸습니다 ...]"
+            )
         return cleaned_text
 
     # ---------------- 지역 일반화 ----------------
@@ -153,7 +197,9 @@ class LLMStructuredCrawler(BaseCrawler):
     def _dedupe_lines(self, text: str) -> str:
         if not text:
             return text
-        norm = lambda s: re.sub(r"[ \t]+", " ", re.sub(r"[·•\-\u2022]+", "-", s.strip().lower()))
+        norm = lambda s: re.sub(
+            r"[ \t]+", " ", re.sub(r"[·•\-\u2022]+", "-", s.strip().lower())
+        )
         seen, out = set(), []
         for ln in text.splitlines():
             if not ln.strip():
@@ -166,7 +212,9 @@ class LLMStructuredCrawler(BaseCrawler):
         return "\n".join(out)
 
     # ---------------- (1) 요약 생성 ----------------
-    def _summarize_from_raw(self, raw_text: str, title_hint: Optional[str]) -> _LLMSummary:
+    def _summarize_from_raw(
+        self, raw_text: str, title_hint: Optional[str]
+    ) -> _LLMSummary:
         RULES_SUMMARY = """
 너는 한국 복지/보건 사업 문서를 구조적으로 요약한다.
 
@@ -184,8 +232,9 @@ class LLMStructuredCrawler(BaseCrawler):
 }
 """
         sys_prompt = RULES_SUMMARY + (
-            "\n제목은 주어졌으므로 새로 추출하지 말 것." if title_hint else
-            "\n제목이 명확하지 않으면 본문에서 가장 적절한 사업명을 1개만 추출."
+            "\n제목은 주어졌으므로 새로 추출하지 말 것."
+            if title_hint
+            else "\n제목이 명확하지 않으면 본문에서 가장 적절한 사업명을 1개만 추출."
         )
         user_prompt = f"원문:\n{raw_text}"
 
@@ -290,7 +339,9 @@ class LLMStructuredCrawler(BaseCrawler):
         # 지역 일반화 + 라인 중복 제거
         out_title = summary.title or title or "제목 없음"
         out_target = self._generalize_region_terms(summary.support_target)
-        out_content = self._dedupe_lines(self._generalize_region_terms(summary.support_content))
+        out_content = self._dedupe_lines(
+            self._generalize_region_terms(summary.support_content)
+        )
 
         # 2) 요약만 입력 → 평가
         eval_res = self._evaluate_summary_only(out_target, out_content)
@@ -300,7 +351,7 @@ class LLMStructuredCrawler(BaseCrawler):
             title=out_title,
             support_target=out_target,
             support_content=out_content,
-            raw_text=raw_text,                 # 보관은 하되 평가에는 사용하지 않음
+            raw_text=raw_text,  # 보관은 하되 평가에는 사용하지 않음
             eval_target=int(eval_res.eval_target),
             eval_content=int(eval_res.eval_content),
         )
@@ -314,8 +365,15 @@ class LLMStructuredCrawler(BaseCrawler):
         title: Optional[str] = None,
     ) -> HealthSupportInfo:
         if url:
-            soup = self.fetch_page(url)
-            source_url = url
+            # 최종 URL도 받아서 리다이렉트 추적
+            result = self.fetch_page(url, return_final_url=True)
+            if isinstance(result, tuple):
+                soup, final_url = result
+                source_url = final_url if final_url else url
+            else:
+                # 하위 호환성: return_final_url=False인 경우
+                soup = result
+                source_url = url
         elif file_path:
             soup = self.parse_html_file(file_path)
             source_url = file_path
@@ -400,4 +458,5 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"[ERROR] 처리 실패: {e}")
         import traceback
+
         traceback.print_exc()

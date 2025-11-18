@@ -7,46 +7,38 @@
 - 각 서비스 상세 정보 크롤링 및 구조화
 """
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import sys
 from bs4 import BeautifulSoup
 import json
 import re
 from typing import List, Dict, Optional
 import os
-import sys
 from datetime import datetime
-import time
 
-# 공통 모듈 import
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-import config
-from base.base_crawler import BaseCrawler
-from base.llm_crawler import LLMStructuredCrawler
-from components.link_filter import LinkFilter
+from ... import config
+from ...base.parallel_crawler import BaseParallelCrawler
 
 
-class WelfareCrawler(BaseCrawler):
+class WelfareCrawler(BaseParallelCrawler):
     """서울시 복지포털 전용 크롤러"""
 
-    def __init__(self, output_dir: str = "app/crawling/output"):
+    def __init__(self, output_dir: str = "app/crawling/output", max_workers: int = 4):
         """
         Args:
             output_dir: 결과 저장 디렉토리
+            max_workers: 병렬 처리 워커 수 (기본값: 4)
         """
-        super().__init__()  # BaseCrawler 초기화
-        self.output_dir = output_dir
-        self.llm_crawler = LLMStructuredCrawler(model="gpt-4o-mini")
-        self.link_filter = LinkFilter()  # 키워드 필터링 컴포넌트
+        super().__init__(output_dir=output_dir, max_workers=max_workers)
         self.base_url = "https://wis.seoul.go.kr"
         self.search_url = "https://wis.seoul.go.kr/sec/ctg/categorySearch.do"
-
-        os.makedirs(output_dir, exist_ok=True)
 
     def collect_all_services(self) -> List[Dict]:
         """
         서울시 복지포털에서 모든 복지 서비스 목록 수집
 
         Returns:
-            복지 서비스 정보 리스트 [{'title': ..., 'description': ..., 'detail_id': ...}]
+            복지 서비스 정보 리스트 [{'name': ..., 'url': ...}]
         """
         print("\n복지포털에서 전체 서비스 목록 가져오는 중...")
 
@@ -97,30 +89,15 @@ class WelfareCrawler(BaseCrawler):
             서비스 정보 딕셔너리 또는 None
         """
         try:
-            title = "제목 없음"
-            description = "설명 없음"
-            department = ""
-            phone = ""
+            name = "제목 없음"
             detail_id = ""
 
             # 제목과 설명 추출
             con_dl = item.find("dl", class_="con")
             if con_dl:
-                title_tag = con_dl.find("dt")
-                if title_tag:
-                    title = title_tag.get_text(strip=True)
-
-                desc_tag = con_dl.find("dd")
-                if desc_tag:
-                    description = desc_tag.get_text(strip=True)
-
-            # 담당부서와 전화번호 추출
-            cnt_div = item.find("div", class_="cnt")
-            if cnt_div:
-                p_tags = cnt_div.find_all("p")
-                if len(p_tags) >= 2:
-                    department = p_tags[0].get_text(strip=True)
-                    phone = p_tags[1].get_text(strip=True)
+                name_tag = con_dl.find("dt")
+                if name_tag:
+                    name = name_tag.get_text(strip=True)
 
             # 상세보기 ID 추출 (javascript:detailOpen(ID))
             detail_link = item.find("a", class_="btn-sss")
@@ -134,12 +111,8 @@ class WelfareCrawler(BaseCrawler):
                 return None
 
             return {
-                "title": title,
-                "description": description,
-                "department": department,
-                "phone": phone,
-                "detail_id": detail_id,
-                "detail_url": f"https://wis.seoul.go.kr/sec/ctg/categoryDetail.do?id={detail_id}",
+                "name": name,
+                "url": f"https://wis.seoul.go.kr/sec/ctg/categoryDetail.do?id={detail_id}",
             }
 
         except Exception as e:
@@ -167,7 +140,7 @@ class WelfareCrawler(BaseCrawler):
         excluded = []
 
         for service in services:
-            combined_text = service["title"] + " " + service["description"]
+            combined_text = service["name"]
 
             # LinkFilter의 check_keyword_filter 사용
             passed, reason = self.link_filter.check_keyword_filter(
@@ -179,22 +152,64 @@ class WelfareCrawler(BaseCrawler):
 
             if passed:
                 filtered.append(service)
-                print(f"  ✓ [포함] {service['title']}")
+                print(f"  ✓ [포함] {service['name']}")
             else:
-                excluded.append({"title": service["title"], "reason": reason})
-                print(f"  ✗ [제외] {service['title']} - {reason}")
+                excluded.append({"name": service["name"], "reason": reason})
+                print(f"  ✗ [제외] {service['name']} - {reason}")
 
         print(
             f"\n[키워드 필터링 완료] {len(services)}개 중 {len(filtered)}개 서비스 선택됨 (제외: {len(excluded)}개)"
         )
         return filtered
 
+    def _process_service_with_tabs(
+        self, service_info: Dict, idx: int, total: int
+    ) -> tuple:
+        """
+        개별 서비스를 처리하고 탭 링크를 감지합니다 (병렬 처리용).
+
+        Args:
+            service_info: 서비스 정보 {'name': ..., 'url': ..., ...}
+            idx: 현재 인덱스
+            total: 전체 개수
+
+        Returns:
+            (success: bool, result: Dict, tab_links: List[Dict])
+        """
+        log_buffer = []
+        url = service_info["url"]
+        name = service_info["name"]
+
+        log_buffer.append(f"\n진행: {idx}/{total} - {name}")
+
+        # BaseParallelCrawler의 process_page_with_tabs 사용
+        success, structured_data, tab_links, final_url = self.process_page_with_tabs(
+            url=url,
+            region="서울시",
+            title=name,
+            log_buffer=log_buffer,
+        )
+
+        if success:
+            result = structured_data.model_dump()
+            log_buffer.append("  ✓ 완료")
+        else:
+            result = None
+            log_buffer.append("  ✗ 실패")
+
+        # 로그 출력 (thread-safe)
+        with self.lock:
+            for line in log_buffer:
+                print(line)
+
+        return success, result, tab_links
+
     def crawl_and_structure_service(self, service_info: Dict) -> Optional[Dict]:
         """
         복지 서비스 상세 페이지 크롤링 및 구조화
 
         Args:
-            service_info: 서비스 정보 {'title': ..., 'detail_url': ..., ...}
+            service_info: 서비스 정보 {'name': ..., 'url': ..., ...}
 
         Returns:
             구조화된 데이터 또는 None (실패 시)
@@ -202,9 +217,9 @@ class WelfareCrawler(BaseCrawler):
         try:
             # LLM 크롤러로 구조화
             structured_data = self.llm_crawler.crawl_and_structure(
-                url=service_info["detail_url"],
+                url=service_info["url"],
                 region="서울시",
-                title=service_info["title"],
+                title=service_info["name"],
             )
 
             # 표준 필드만 반환
@@ -264,29 +279,109 @@ class WelfareCrawler(BaseCrawler):
         print(f"\n✓ 처리 대상: {len(services_to_process)}개")
         print(f"✓ 링크 목록 저장: {links_file}")
 
-        # 3단계: 각 서비스 크롤링 및 구조화
+        # 3단계: 각 서비스 크롤링 및 구조화 (병렬 처리)
         print("\n[3단계] 서비스 크롤링 및 구조화 중...")
+        print(f"  병렬 처리: {self.max_workers}개 워커 사용")
         print("-" * 80)
 
         all_results = []
         success_count = 0
         fail_count = 0
+        additional_tab_links = []
 
-        for idx, service_info in enumerate(services_to_process, 1):
-            print(f"\n진행: {idx}/{len(services_to_process)} - {service_info['title']}")
+        # ThreadPoolExecutor를 사용한 병렬 처리
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # 모든 작업 제출
+            future_to_service = {
+                executor.submit(
+                    self._process_service_with_tabs,
+                    service_info,
+                    idx,
+                    len(services_to_process),
+                ): service_info
+                for idx, service_info in enumerate(services_to_process, 1)
+            }
 
-            result = self.crawl_and_structure_service(service_info)
+            # 완료된 작업 처리
+            for future in as_completed(future_to_service):
+                try:
+                    success, result, tab_links = future.result()
 
-            if result:
-                all_results.append(result)
-                success_count += 1
-                print("  ✓ 완료")
-            else:
-                fail_count += 1
+                    if success and result:
+                        all_results.append(result)
+                        success_count += 1
 
-            # API 제한 고려하여 약간의 지연
-            if idx < len(services_to_process):
-                time.sleep(1)
+                        # 탭 링크 수집
+                        if tab_links:
+                            additional_tab_links.extend(tab_links)
+                    else:
+                        fail_count += 1
+
+                except Exception as e:
+                    fail_count += 1
+                    with self.lock:
+                        print(f"✗ 작업 처리 중 오류: {e}")
+
+        # 탭 링크 처리
+        if additional_tab_links:
+            print(f"\n[탭 링크 처리] 총 {len(additional_tab_links)}개의 탭 링크 발견")
+            print("-" * 80)
+
+            # 키워드 필터링 적용
+            if config.KEYWORD_FILTER["mode"] != "none":
+                filtered_tabs = []
+                for tab_link in additional_tab_links:
+                    passed, reason = self.link_filter.check_keyword_filter(
+                        tab_link["text"],
+                        whitelist=config.KEYWORD_FILTER.get("whitelist"),
+                        blacklist=config.KEYWORD_FILTER.get("blacklist"),
+                        mode=config.KEYWORD_FILTER["mode"],
+                    )
+                    if passed:
+                        filtered_tabs.append(tab_link)
+                        print(f"  ✓ [포함] {tab_link['text']}")
+                    else:
+                        print(f"  ✗ [제외] {tab_link['text']} - {reason}")
+
+                additional_tab_links = filtered_tabs
+                print(f"\n필터링 후 {len(additional_tab_links)}개 탭 링크 선택됨")
+
+            # 탭 링크도 병렬 처리
+            if additional_tab_links:
+                print(f"\n탭 링크 크롤링 시작 ({len(additional_tab_links)}개)...")
+
+                with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                    # 탭 링크를 서비스 정보 형태로 변환
+                    tab_services = [
+                        {
+                            "name": tab["text"],
+                            "url": tab["url"],
+                        }
+                        for tab in additional_tab_links
+                    ]
+
+                    future_to_tab = {
+                        executor.submit(
+                            self._process_service_with_tabs,
+                            tab_service,
+                            idx,
+                            len(tab_services),
+                        ): tab_service
+                        for idx, tab_service in enumerate(tab_services, 1)
+                    }
+
+                    for future in as_completed(future_to_tab):
+                        try:
+                            success, result, _ = future.result()
+                            if success and result:
+                                all_results.append(result)
+                                success_count += 1
+                            else:
+                                fail_count += 1
+                        except Exception as e:
+                            fail_count += 1
+                            with self.lock:
+                                print(f"✗ 탭 링크 처리 중 오류: {e}")
 
         # 4단계: 결과 저장
         print("\n[4단계] 결과 저장 중...")
@@ -308,6 +403,8 @@ class WelfareCrawler(BaseCrawler):
         print(f"✓ 전체 서비스: {len(all_services)}개")
         if filter_health:
             print(f"✓ 필터링된 서비스: {len(services_to_process)}개")
+        if additional_tab_links:
+            print(f"✓ 탭 링크 추가 처리: {len(additional_tab_links)}개")
         print(f"✓ 성공: {success_count}개")
         print(f"✗ 실패: {fail_count}개")
         if save_json:
@@ -316,6 +413,25 @@ class WelfareCrawler(BaseCrawler):
 
         if return_data:
             return all_results
+
+    def run(self, start_url: str = None, **kwargs):
+        """
+        크롤러 팩토리 호환용 run() 메서드
+
+        Args:
+            start_url: 시작 URL (사용하지 않음, 인터페이스 통일용)
+            **kwargs: run_workflow()에 전달할 추가 인자
+
+        Returns:
+            크롤링 결과 데이터
+        """
+        return self.run_workflow(
+            filter_health=kwargs.get("filter_health", True),
+            max_items=kwargs.get("max_items"),
+            output_filename=kwargs.get("output_filename"),
+            return_data=True,
+            save_json=kwargs.get("save_json", True),
+        )
 
 
 def main():
@@ -344,11 +460,17 @@ def main():
         default="app/crawling/output",
         help="출력 디렉토리 (기본값: app/crawling/output)",
     )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=4,
+        help="병렬 처리 워커 수 (기본값: 4)",
+    )
 
     args = parser.parse_args()
 
     # 크롤러 생성 및 실행
-    crawler = WelfareCrawler(output_dir=args.output_dir)
+    crawler = WelfareCrawler(output_dir=args.output_dir, max_workers=args.max_workers)
 
     try:
         crawler.run_workflow(

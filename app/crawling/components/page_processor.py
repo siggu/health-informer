@@ -10,9 +10,9 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-import config
-import utils
-from utils import extract_link_from_element
+from app.crawling import config
+from app.crawling import utils
+from app.crawling.utils import extract_link_from_element
 
 
 class PageProcessor:

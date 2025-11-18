@@ -75,15 +75,17 @@ class BaseCrawler:
         # SSL 검증 설정 반환
         return site_config.get("verify_ssl", True)
 
-    def fetch_page(self, url: str) -> Optional[BeautifulSoup]:
+    def fetch_page(self, url: str, return_final_url: bool = False):
         """
         웹페이지 가져오기
 
         Args:
             url: 크롤링할 URL
+            return_final_url: True면 (soup, final_url) 튜플 반환, False면 soup만 반환
 
         Returns:
-            BeautifulSoup 객체 또는 None (실패 시)
+            return_final_url=False: BeautifulSoup 객체 또는 None (실패 시)
+            return_final_url=True: (BeautifulSoup 객체, 최종 URL) 튜플 또는 (None, None) (실패 시)
         """
         import time
         start_time = time.time()
@@ -97,6 +99,9 @@ class BaseCrawler:
             response = self.session.get(url, timeout=self.timeout, verify=verify_ssl)
             response.raise_for_status()
             http_duration = time.time() - http_start
+
+            # 최종 URL 저장 (리다이렉트된 경우 최종 도착 URL)
+            final_url = response.url
 
             # 인코딩 설정
             if response.apparent_encoding:
@@ -120,10 +125,14 @@ class BaseCrawler:
             except:
                 pass  # 통계 기록 실패해도 계속 진행
 
+            if return_final_url:
+                return soup, final_url
             return soup
 
         except requests.RequestException as e:
             print(f"  [오류] 페이지 요청 실패: {url} - {e}")
+            if return_final_url:
+                return None, None
             return None
 
     def get(

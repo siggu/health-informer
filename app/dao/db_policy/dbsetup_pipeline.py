@@ -15,9 +15,9 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from app.crawling.crawlers.district_crawler import DistrictCrawler
-from app.crawling.crawlers.welfare_crawler import WelfareCrawler
-from app.crawling.crawlers.ehealth_crawler import EHealthCrawler
+from app.crawling.crawler_factory import get_crawler_for_url
+from app.crawling.crawlers.specific_crawler.welfare_crawler import WelfareCrawler
+from app.crawling.crawlers.specific_crawler.ehealth_crawler import EHealthCrawler
 from app.crawling.crawlers import run_all_crawlers as rac
 from app.dao.db_policy import dbuploader_policy as dbuploader
 from app.dao.db_policy import dbgrouper_policy as dbgrouper
@@ -38,11 +38,28 @@ def _ensure_dir(p: str):
 # 수집 함수들
 # ─────────────────────────────────────────────
 def collect_district(urls, out_dir):
+    """
+    크롤러 팩토리를 사용한 지역 보건소 데이터 수집
+    URL만으로 자동으로 적절한 크롤러 선택
+    """
     all_data = []
     for url in urls:
-        crawler = DistrictCrawler(output_dir=out_dir)
-        summary = crawler.run(start_url=url, save_links=True, save_json=False, return_data=True)
-        all_data.extend(summary.get("data", []))
+        try:
+            # 크롤러 팩토리 사용 (URL만으로 자동 선택)
+            crawler = get_crawler_for_url(
+                url=url,
+                output_dir=out_dir,
+                max_workers=4
+            )
+
+            summary = crawler.run(start_url=url, save_links=True, save_json=False, return_data=True)
+            all_data.extend(summary.get("data", []))
+
+        except Exception as e:
+            eprint(f"[collect_district] URL {url} 처리 중 오류: {e}")
+            traceback.print_exc()
+            continue
+
     return all_data
 
 
@@ -326,6 +343,17 @@ def main():
                     "https://www.ydp.go.kr/health/contents.do?key=6073&",
                     "https://www.songpa.go.kr/ehealth/contents.do?key=4525&",
                     "https://jongno.go.kr/Health.do?menuId=401309&menuNo=401309",
+                    "https://www.nowon.kr/health/healthIncrz/healthIncrz1/healthIncrz1_02.jsp",
+                    "https://health.dobong.go.kr/Contents.asp?code=10005042",
+                    "https://www.ddm.go.kr/health/contents.do?key=1257",
+                    "https://www.mapo.go.kr/site/health/content/health04021401",
+                    "https://www.sd.go.kr/health/contents.do?key=2284&",
+                    "https://www.yangcheon.go.kr/health/health/02/10201010000002024022101.jsp",
+                    "https://www.yongsan.go.kr/health/main/contents.do?menuNo=300064",
+                    "https://www.ep.go.kr/health/contents.do?key=1582",
+                    "https://www.junggu.seoul.kr/health/content.do?cmsid=15845",
+                    "https://www.jungnang.go.kr/health/bbs/list/B0000412.do?menuNo=400364#n",
+                    "https://www.nhis.or.kr/nhis/minwon/wbhapa01000m01.do",
                 ]
 
             eprint(f"[district] {len(urls)}개 URL 처리 (메모리 수집)")
