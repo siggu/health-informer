@@ -181,14 +181,18 @@ except Exception:
         }
 
 # 6) answer_llm
+# 6) answer_llm
 try:
-    from app.langgraph.nodes.llm_answer_creator import answer as answer_llm_node
-except Exception:
+    from app.langgraph.nodes.llm_answer_creator import answer_llm_node
+    print("[service_graph] answer_llm_node import SUCCESS")
+except Exception as e:
+    print("[service_graph] answer_llm_node import FAILED:", e)
+
     def answer_llm_node(state: State) -> Dict[str, Any]:
         ui = state.get("user_input") or ""
         ans = f"(더미 응답) 질문을 받았어요: {ui[:60]}"
         return {
-            "answer": ans,
+            "answer": {"text": ans},
             "messages": [{
                 "role": "assistant",
                 "content": ans,
@@ -196,6 +200,7 @@ except Exception:
                 "meta": {},
             }],
         }
+
 
 # 7) persist_pipeline
 try:
@@ -312,7 +317,7 @@ if __name__ == "__main__":
     print("=== RUN 1 ===")
     out = app.invoke({
         "session_id": "sess-001",
-        "profile_id": 1,
+        "profile_id": 76,
         "user_input": "저는 중위소득 50%이고 당뇨가 있어요. 받을 수 있는 의료 지원이 궁금해요.",
         "rolling_summary": None,
         "end_session": False,
@@ -323,7 +328,7 @@ if __name__ == "__main__":
     print("=== RUN 2 (END SESSION) ===")
     out2 = app.invoke({
         "session_id": "sess-001",
-        "profile_id": 1,
+        "profile_id": 76,
         "user_input": "오늘 대화 저장해줘.",
         "rolling_summary": out.get("rolling_summary"),
         "end_session": True,

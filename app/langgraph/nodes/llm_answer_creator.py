@@ -1,39 +1,7 @@
-# llm_answer_creator.py
+# llm_answer_creator.py (Gemini Version)
 # 목적: "Answer LLM" 노드
-# - Router/Planner 결과(retrieval.used, profile_ctx, collection_ctx)를 받아
-#   의료복지 맥락의 응답을 생성한다.
-# - 결론(요약) → 근거(프로필/컬렉션 인용) → 다음 단계(증빙/확인/신청 경로) 순서로 답한다.
-# - RAG 미사용(NONE)일 때는 일반 규칙 중심의 안전한 가이드만 제공.
-#
-# 의존:
-#   pip install openai python-dotenv
-#
-# 환경:
-#   OPENAI_API_KEY
-#   ANSWER_MODEL (기본 gpt-4o-mini)
-#
-# 입력 state 예:
-#   {
-#     "user_id": "u1",
-#     "input_text": "재난적 의료비 대상인가요? 저는 의료급여2종이에요.",
-#     "retrieval": {
-#        "used": "BOTH",
-#        "profile_ctx": {...},                 # fetch_profile_context 결과
-#        "collection_ctx": [ {...}, {...} ]    # fetch_collection_context 결과
-#     }
-#   }
-#
-# 출력:
-#   state["answer"] = {
-#     "text": "<최종 답변 한국어>",
-#     "citations": { "profile": {...} | None, "collection": [..] | None },
-#     "used": "PROFILE|COLLECTION|BOTH|NONE"
-#   }
-#
-# 메모:
-# - 개인 식별정보(정확 주소, 주민번호)는 절대 노출/요청하지 않음.
-# - 정책 단정이 어려우면 "가능성/추가 확인 필요"로 안내.
-# - SQL 임계치/연도별 기준은 본 모듈에서 하드코딩하지 않음(룰 엔진 외부화 전제).
+# - RetrievalPlanner의 결과를 받아 최종 답변 생성
+# - Google Gemini API를 사용하여 답변 생성
 
 from __future__ import annotations
 
@@ -43,107 +11,109 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
-from openai import OpenAI
+import google.generativeai as genai
 
-from app.langgraph.state.ephemeral_context import State as GraphState, Message
 from app.langgraph.state.ephemeral_context import State as GraphState, Message
 
 load_dotenv()
 
-ANSWER_MODEL = os.getenv("ANSWER_MODEL", "gpt-4o-mini")
-client = OpenAI()
+# Gemini API 설정
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+ANSWER_MODEL = os.getenv("ANSWER_MODEL", "gemini-2.0-flash")
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────
 # 시스템 프롬프트
-# ─────────────────────────────────────────────────────────────────────────────
-# SYSTEM_PROMPT = """당신은 의료복지 지원자격 상담사이다.
-# 입력(사용자 질문, Profile/Collection 컨텍스트)을 바탕으로 아래 원칙에 맞춘 한국어 답변을 생성한다.
-
-# [스타일]
-# - 구조: ①결론(한 줄 요약) → ②근거(인용·수치) → ③다음 단계(증빙/확인/신청 경로)
-# - 단정이 어려우면 "가능성 높음/추가 확인 필요"로 표현
-# - 근거는 제공된 컨텍스트(Profile/Collection)만 사용. 모르는 사실은 추측 금지
-# - 숫자·코드·등급은 원문 그대로 인용(존재할 때만)
-# - 지나친 장황함 금지. 단락은 2~5개, 항목은 3~7개
-
-# [보안/프라이버시]
-# - 주민번호/정확 주소 등 민감 PII 요구 금지
-# - 필요 서류 요청은 유형만 제시(예: 진단서, 산정특례 등록증, 건강보험 자격득실확인서)
-
-# [출력 형식]
-# - 마크다운 사용 가능(소제목, 불릿)
-# - 대답 내용만 출력(메타 설명 금지)
+# ───────────────────────────────────────────────────────────
+# SYSTEM_PROMPT = """
+# 당신의 임무는 RetrievalPlanner로부터 전달된 문서 목록만을 사용하여 답변하는 것입니다.
+# 규칙:
+# - 전달된 문서들만 출력합니다.
+# - 전달되지 않은 문서는 생성하거나 가정하지 않습니다.
+# - 전달된 문서가 6개면 6개 모두 출력하고,
+#   전달된 문서가 1개면 1개만 출력합니다.
+# - 사용자가 자격이 되는 지원사업만 이미 필터링된 상태로 전달됩니다.
+# - 당신은 추가적인 자격 판단을 하지 않습니다.
+# - 문서에 있는 요건 및 내용을 기반으로 요약하여 안내합니다.
+# - 답변 마지막에 출처 URL을 포함합니다.
 # """
+
 SYSTEM_PROMPT = """
-당신은 의료복지 지원자격 상담사이다.
-지침:
-- 사용자의 질문에 대해 검색 도구를 사용하여 관련 정보를 찾을 것
-- 검색 결과를 바탕으로 명확하고 친절하게 답변할 것
-- **사용자 정보(나이, 건강 상태, 소득 수준 등)를 고려하여 해당되는 지원 사업을 우선적으로 추천할 것**
-- 지원 대상 요건을 확인하고 사용자가 자격이 되는지 명확히 안내할 것
-- 지원 대상, 지원 내용, 신청 방법 등 핵심 정보를 간결하게 요약할 것
-- 여러 지역의 정보가 있다면 지역별로 구분하여 안내해야하며 만약 제공된 문서에 세부 지원 내용이 존재한다면 그 내용을 기반으로 답변할 것
-- 정보가 부족하면 "해당 정보를 찾을 수 없습니다"라고 솔직히 답변할 것
-- 예시 질문 : 암 지원에 대해 알려줘 인 경우 제공 문서에 암 지원이 없으면 참조 하지 않을 것
-- 답변 끝에는 출처 URL을 제공하세요.
+당신의 임무는 RetrievalPlanner로부터 전달된 문서 목록만을 사용하여 답변하는 것입니다.
+
+규칙(절대 준수):
+- 전달된 문서들만 출력합니다.
+- 전달되지 않은 문서는 생성하거나 추론하지 않습니다.
+- 전달된 document 개수만큼 정확히 같은 개수를 출력합니다.
+- 이미 RetrievalPlanner에서 자격 필터링이 완료된 상태이므로 추가 자격 판단을 하지 않습니다.
+
+출력 형식(강제):
+각 문서는 아래 형식을 그대로 사용하여 출력합니다:
+
+{문서번호}. {title}
+- 지원 내용: 문서의 "benefits" 또는 snippet 기반으로 요약
+- 지원 자격: 문서의 "requirements" 기반으로 요약
+- 신청 방법: 문서에 존재하면 요약, 없으면 링크 참조
+- 링크: {url}
+
+주의:
+- 링크는 각 문서마다 딱 한 번만 출력합니다.
+- 마지막에 전체 URL 목록을 다시 나열하지 않습니다.
+- 지원 내용/자격/신청방법이 문서에 없으면 "제공된 문서에 해당 정보가 없습니다."라고 명시합니다.
+- 문서 순서는 전달받은 순서를 유지합니다.
+
+답변 전체 구조:
+1) 간단한 한 줄 결론
+2) 위 출력 형식에 따라 문서들을 나열
+3) 추가 안내(필요한 경우만)
 """
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────
 # 컨텍스트 요약/서식화
-# ─────────────────────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────
+
 def _format_profile_ctx(p: Optional[Dict[str, Any]]) -> str:
     if not p or "error" in p:
         return ""
     lines: List[str] = []
 
-    # summary는 retrieval_planner에서 이미 구성됨(있으면 그대로 사용)
     if p.get("summary"):
         lines.append(f"- 요약: {p['summary']}")
 
-    # 건보 자격
     if p.get("insurance_type"):
         lines.append(f"- 건보 자격: {p['insurance_type']}")
 
-    # 기준중위소득 비율 (숫자/문자열 모두 허용)
     mir_raw = p.get("median_income_ratio")
     if mir_raw is not None:
         try:
-            v = float(mir_raw)  # '50', 50, 0.5, '50.0' 등 처리
-        except Exception:
-            # 숫자로 파싱이 안 되면 있는 그대로 보여주기
-            lines.append(f"- 중위소득 비율: {mir_raw}")
-        else:
-            # 0~10이면 비율(0.5 → 50%), 10 이상이면 이미 %라고 가정
+            v = float(mir_raw)
             if v <= 10:
                 pct = v * 100.0
             else:
                 pct = v
             lines.append(f"- 중위소득 비율: {pct:.1f}%")
+        except:
+            lines.append(f"- 중위소득 비율: {mir_raw}")
 
-    # 기초생활보장 급여
     if (bb := p.get("basic_benefit_type")):
         lines.append(f"- 기초생활보장: {bb}")
 
-    # 장애 등급 (0/1/2 매핑)
     if (dg := p.get("disability_grade")) is not None:
         dg_label = {0: "미등록", 1: "심한", 2: "심하지않음"}.get(dg, str(dg))
         lines.append(f"- 장애 등급: {dg_label}")
 
-    # 장기요양 등급
     if (lt := p.get("ltci_grade")) and lt != "NONE":
         lines.append(f"- 장기요양 등급: {lt}")
 
-    # 임신/출산 12개월 이내
     if p.get("pregnant_or_postpartum12m") is True:
         lines.append("- 임신/출산 12개월 이내")
 
     return "\n".join(lines)
 
+
 def _format_collection_ctx(items: Optional[List[Dict[str, Any]]]) -> str:
     if not items:
         return ""
     out = []
-    # 최근 8개까지만 요약
     for it in items[:8]:
         if "error" in it:
             continue
@@ -152,40 +122,37 @@ def _format_collection_ctx(items: Optional[List[Dict[str, Any]]]) -> str:
             segs.append(f"[{it['predicate']}]")
         if it.get("object"):
             segs.append(it["object"])
-        # 코드/날짜/부정
-        code_bits = []
-        if it.get("code_system") and it.get("code"):
-            code_bits.append(f"{it['code_system']}:{it['code']}")
-        if it.get("onset_date"):
-            code_bits.append(f"onset={it['onset_date']}")
-        if it.get("end_date"):
-            code_bits.append(f"end={it['end_date']}")
-        if it.get("negation"):
-            code_bits.append("negation=true")
-        if code_bits:
-            segs.append("(" + ", ".join(code_bits) + ")")
         out.append("- " + " ".join(segs))
     return "\n".join(out)
+
 
 def _format_documents(items: Optional[List[Dict[str, Any]]]) -> str:
     if not items:
         return ""
     out: List[str] = []
+
     for idx, doc in enumerate(items[:6], start=1):
         if not isinstance(doc, dict):
             continue
-        title = (doc.get("title") or doc.get("doc_id") or f"문서 {idx}").strip()
+
+        title = doc.get("title") or doc.get("doc_id") or f"문서 {idx}"
         source = doc.get("source")
         score = doc.get("score")
+        url = doc.get("url")
+        snippet = doc.get("snippet") or ""
+
         header = f"{idx}. {title}"
         if source:
             header += f" ({source})"
-        if isinstance(score, (int, float)):
+        if score:
             header += f" [score={score:.3f}]"
-        snippet = doc.get("snippet") or doc.get("summary") or ""
+
         out.append(f"- {header}")
-        if snippet:
-            out.append(f"  > {str(snippet).strip()[:280]}")
+        out.append(f"  > {snippet.strip()}")
+
+        if url:
+            out.append(f"  출처: {url}")
+
     return "\n".join(out)
 
 
@@ -223,9 +190,10 @@ def _build_user_prompt(
 """)
     return "\n".join(lines)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# LLM 호출
-# ─────────────────────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────
+# Gemini LLM 호출
+# ───────────────────────────────────────────────────────────
+
 def run_answer_llm(
     input_text: str,
     used: str,
@@ -234,6 +202,7 @@ def run_answer_llm(
     summary: Optional[str] = None,
     documents: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
+
     user_prompt = _build_user_prompt(
         input_text,
         used,
@@ -242,19 +211,43 @@ def run_answer_llm(
         summary=summary,
         documents=documents,
     )
-    resp = client.chat.completions.create(
-        model=ANSWER_MODEL,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.3,
-    )
-    return (resp.choices[0].message.content or "").strip()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 컨텍스트 보조 함수
-# ─────────────────────────────────────────────────────────────────────────────
+    model = genai.GenerativeModel(ANSWER_MODEL)
+
+    # Gemini 2.x 에서는 system role 불가능 → system 프롬프트를 문자열 결합으로 넣어야 함
+    full_prompt = SYSTEM_PROMPT + "\n\n" + user_prompt
+
+    try:
+        resp = model.generate_content(
+            full_prompt,
+            generation_config={"temperature": 0.3},
+        )
+
+        # 1) resp.text가 있을 경우
+        if hasattr(resp, "text") and resp.text:
+            return resp.text.strip()
+
+        # 2) Gemini 2.x 표준 구조: candidates[].content.parts[].text
+        if resp.candidates:
+            cand = resp.candidates[0]
+            if cand.content and cand.content.parts:
+                text = "".join(
+                    part.text
+                    for part in cand.content.parts
+                    if hasattr(part, "text")
+                )
+                return text.strip()
+
+        return str(resp)
+
+    except Exception as e:
+        print("🔥🔥 [Gemini ERROR]", e)
+        raise
+
+# ───────────────────────────────────────────────────────────
+# 메시지 컨텍스트 추출
+# ───────────────────────────────────────────────────────────
+
 def _extract_context_from_messages(messages: List[Message]) -> Dict[str, Any]:
     for msg in reversed(messages or []):
         if msg.get("role") != "tool":
@@ -298,6 +291,10 @@ def _safe_json(value: Any, limit: int = 400) -> str:
     return text[:limit] + ("..." if len(text) > limit else "")
 
 
+# ───────────────────────────────────────────────────────────
+# Fallback 메시지
+# ───────────────────────────────────────────────────────────
+
 def _build_fallback_text(
     used: str,
     profile_ctx: Any,
@@ -317,6 +314,10 @@ def _build_fallback_text(
     )
 
 
+# ───────────────────────────────────────────────────────────
+# 메인 answer 노드
+# ───────────────────────────────────────────────────────────
+
 def answer(state: GraphState) -> Dict[str, Any]:
     messages: List[Message] = list(state.get("messages") or [])
     retrieval = state.get("retrieval") or {}
@@ -324,53 +325,48 @@ def answer(state: GraphState) -> Dict[str, Any]:
 
     profile_ctx = ctx.get("profile") or retrieval.get("profile_ctx")
     collection_ctx = ctx.get("collection") or retrieval.get("collection_ctx")
+
     if isinstance(collection_ctx, dict) and "triples" in collection_ctx:
         collection_ctx_list = collection_ctx["triples"]
     elif isinstance(collection_ctx, list):
         collection_ctx_list = collection_ctx
     else:
         collection_ctx_list = None
+
     documents = ctx.get("documents") or retrieval.get("rag_snippets")
     summary = ctx.get("summary") or state.get("rolling_summary")
-
-    profile_ctx_dict = profile_ctx if isinstance(profile_ctx, dict) else None
-    collection_ctx_list = collection_ctx if isinstance(collection_ctx, list) else None
-    documents_list = documents if isinstance(documents, list) else None
 
     input_text = (
         (state.get("user_input") or state.get("input_text") or "").strip()
         or _last_user_content(messages).strip()
     )
+
     used = (retrieval.get("used") or "").strip().upper()
     if not used:
-        used = _infer_used_flag(profile_ctx_dict, collection_ctx_list, documents_list)
+        used = _infer_used_flag(profile_ctx, collection_ctx_list, documents)
 
     try:
         text = run_answer_llm(
             input_text,
             used,
-            profile_ctx_dict,
+            profile_ctx,
             collection_ctx_list,
             summary=summary,
-            documents=documents_list,
+            documents=documents,
         )
-    except Exception as e:
-        import traceback
-        print("[answer_llm] ERROR:", repr(e))
-        traceback.print_exc()
+    except Exception:
         text = _build_fallback_text(
             used,
-            profile_ctx_dict,
+            profile_ctx,
             collection_ctx_list,
-            documents_list,
+            documents,
             summary,
         )
 
-
     citations = {
-        "profile": profile_ctx_dict,
+        "profile": profile_ctx,
         "collection": collection_ctx_list,
-        "documents": documents_list,
+        "documents": documents,
     }
 
     assistant_message: Message = {
@@ -381,9 +377,9 @@ def answer(state: GraphState) -> Dict[str, Any]:
             "model": ANSWER_MODEL,
             "used": used,
             "citations": {
-                "profile": bool(profile_ctx_dict),
+                "profile": bool(profile_ctx),
                 "collection_count": len(collection_ctx_list or []),
-                "document_count": len(documents_list or []),
+                "document_count": len(documents or []),
             },
         },
     }
@@ -397,43 +393,6 @@ def answer(state: GraphState) -> Dict[str, Any]:
         "messages": [assistant_message],
     }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# LangGraph 상태 & 노드
-# ─────────────────────────────────────────────────────────────────────────────
-def answer_llm_node(state: GraphState) -> Dict[str, Any]:
-    """
-    사전 조건:
-      - retrieval_planner_node가 state["retrieval"]을 채운 상태
-    동작:
-      - 컨텍스트를 포맷하여 LLM에 전달 → 응답 생성 → state["answer"] 기록
-    """
-    return answer(state)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 단독 실행 테스트
-# ─────────────────────────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    # 가벼운 데모: Retrieval이 이미 채워졌다고 가정
-    demo_state: GraphState = {
-        "user_id": "u_demo_1",
-        "input_text": "재난적 의료비 대상인지 알고 싶어요. 저는 의료급여2종이고, 최근 유방암 치료 중입니다.",
-        "retrieval": {
-            "used": "BOTH",
-            "profile_ctx": {
-                "summary": "건보자격 MEDICAL_AID_2 / 중위소득 45.0% / 장애등급 미등록",
-                "insurance_type": "MEDICAL_AID_2",
-                "median_income_ratio": 45.0,
-                "basic_benefit_type": "MEDICAL",
-                "disability_grade": 0,
-                "ltci_grade": "NONE",
-                "pregnant_or_postpartum12m": False,
-            },
-            "collection_ctx": [
-                {"predicate":"HAS_CONDITION","object":"유방암","code_system":"KCD10","code":"C50.9","onset_date":"2025-06","negation":False,"confidence":0.9,"created_at":"2025-10-01T12:00:00"},
-                {"predicate":"UNDER_TREATMENT","object":"항암요법","onset_date":"2025-06","negation":False,"confidence":0.9,"created_at":"2025-10-05T12:00:00"},
-                {"predicate":"HAS_DOCUMENT","object":"진단서","confidence":0.8,"created_at":"2025-10-10T12:00:00"}
-            ]
-        }
-    }
-    out_state = answer_llm_node(demo_state)
-    print(out_state["answer"]["text"])
+def answer_llm_node(state: GraphState) -> Dict[str, Any]:
+    return answer(state)
