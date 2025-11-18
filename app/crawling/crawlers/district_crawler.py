@@ -15,19 +15,15 @@ import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
+from datetime import datetime
+from typing import Any, Dict, List, Sequence, Set, Tuple
 
-# 공통 모듈 import
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-import config
-import utils
-from base.base_crawler import BaseCrawler
-from base.llm_crawler import LLMStructuredCrawler
-from components.link_collector import LinkCollector
-from components.link_filter import LinkFilter
-from components.page_processor import PageProcessor
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
+from app.crawling import config, utils
+from app.crawling.utils import normalize_url
+from app.crawling.base.workflow_crawler import WorkflowCrawler
+from app.crawling.components.link_collector import LinkCollector
 
 
 class DistrictCrawler(WorkflowCrawler):
