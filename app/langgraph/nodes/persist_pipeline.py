@@ -388,9 +388,19 @@ def persist(
     _mode = ENV_MODE if cleaner_mode is None else cleaner_mode
     _no_store = ENV_NO_STORE_POLICY if no_store_policy is None else no_store_policy
 
-    # 2) 메시지 클리닝 (PII 마스킹, no_store 처리, 길이 제한)
+    # 2) state.messages 내에서 중복 제거 (content + role 기준)
+    #    → LLM은 전체 대화 이력을 참조하지만, DB에는 중복 없이 저장
+    seen = set()
+    deduped_msgs: List[Message] = []
+    for m in raw_msgs:
+        key = (m.get("content", ""), m.get("role", ""))
+        if key not in seen:
+            seen.add(key)
+            deduped_msgs.append(m)
+
+    # 3) 메시지 클리닝 (PII 마스킹, no_store 처리, 길이 제한)
     cleaned: List[Message] = clean_messages(
-        messages=raw_msgs,
+        messages=deduped_msgs,  # 중복 제거된 메시지 사용
         enable=_enable,
         mode=_mode,
         no_store_policy=_no_store,
