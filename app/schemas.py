@@ -77,24 +77,24 @@ class UserLogin(BaseModel):
 class UserProfile(BaseModel):
     """
     사용자 프로필 정보 구조
-    ✅ 프론트엔드 필드명과 일치하도록 수정
-    ✅ field_validator로 DB 필드명으로 자동 변환
+    프론트엔드 필드명과 일치하도록 수정
+    field_validator로 DB 필드명으로 자동 변환
     """
 
     # 프론트엔드 필드명 (camelCase)
     name: Optional[str] = None
-    gender: Optional[str] = None  # ✅ sex → gender
+    gender: Optional[str] = None  # sex → gender
     birthDate: Optional[str] = None
-    location: Optional[str] = None  # ✅ residency_sgg_code → location
-    healthInsurance: Optional[str] = None  # ✅ insurance_type → healthInsurance
-    incomeLevel: Optional[float] = None  # ✅ median_income_ratio → incomeLevel
-    basicLivelihood: Optional[str] = None  # ✅ basic_benefit_type → basicLivelihood
-    disabilityLevel: Optional[str] = None  # ✅ disability_grade → disabilityLevel
+    location: Optional[str] = None  # residency_sgg_code → location
+    healthInsurance: Optional[str] = None  # insurance_type → healthInsurance
+    incomeLevel: Optional[float] = None  # median_income_ratio → incomeLevel
+    basicLivelihood: Optional[str] = None  # basic_benefit_type → basicLivelihood
+    disabilityLevel: Optional[str] = None  # disability_grade → disabilityLevel
     longTermCare: Optional[str] = None
     pregnancyStatus: Optional[str] = None
     isActive: Optional[bool] = None
 
-    # ✅ DB로 저장하기 전에 필드명 변환
+    # DB로 저장하기 전에 필드명 변환
     def to_db_dict(self) -> dict:
         """프론트엔드 필드명을 DB 필드명으로 변환"""
         return {
@@ -110,7 +110,7 @@ class UserProfile(BaseModel):
             "pregnant_or_postpartum12m": self.pregnancyStatus,  # pregnancyStatus → pregnant_or_postpartum12m
         }
 
-    # ✅ DB에서 가져온 데이터를 프론트엔드 형식으로 변환
+    # DB에서 가져온 데이터를 프론트엔드 형식으로 변환
     @classmethod
     def from_db_dict(cls, db_data: dict):
         """DB 필드명을 프론트엔드 필드명으로 변환"""

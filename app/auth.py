@@ -1,6 +1,6 @@
-from datetime import datetime, timedelta
+"""인증 관련 유틸리티 함수들 - DB 의존성 제거 버전 함수 수정 완료 11.18"""
+from datetime import datetime, timedelta, timezone
 from typing import Optional
-
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
@@ -11,7 +11,7 @@ from app.schemas import TokenData
 # 설정 값 (실제 애플리케이션에서는 환경 변수나 설정 파일에서 불러와야 합니다.)
 SECRET_KEY = "YOUR_SECRET_KEY"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 10
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -20,9 +20,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     """주어진 데이터로 JWT 액세스 토큰을 생성합니다."""
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
@@ -49,8 +49,5 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> TokenData:
         raise credentials_exception
 
     return token_data
-
-
-# NOTE: 데이터베이스 의존성 제거에 따라 get_db_session()과 get_current_active_user()는 제거되었습니다.
-# 유저 객체 조회 및 is_active 검증과 같은 DB 관련 로직은
-# 이제 라우터 파일(예: users/router.py) 내의 새로운 의존성 함수에서 처리해야 합니다.
+# 이제 get_current_user 함수는 데이터베이스에 접근하지 않으며,
+# 단순히 토큰을 검증하고 TokenData 객체를 반환하는 역할만 수행
