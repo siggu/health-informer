@@ -231,7 +231,9 @@ def route(state: State) -> RouterOutput:
             "role": "tool",
             "content": "[router] user_action=save → persist_pipeline으로 바로 이동",
             "created_at": _now_iso(),
-            "meta": {},
+                "meta": {
+        "no_store": True,  
+    },
         }
         return {
             "router": router_info,
@@ -252,7 +254,9 @@ def route(state: State) -> RouterOutput:
             "role": "tool",
             "content": f"[router] user_action={action} → next=end",
             "created_at": _now_iso(),
-            "meta": {},
+                "meta": {
+        "no_store": True,  
+    },
         }
         return {
             "router": router_info,

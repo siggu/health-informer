@@ -67,7 +67,9 @@ except Exception:
             "role": "tool",
             "content": "[session_orchestrator] dummy node executed",
             "created_at": _now_iso(),
-            "meta": {},
+                "meta": {
+        "no_store": True,  
+    },
         }
         return {
             # ★ messages 전체 대신, 이번에 추가할 메시지만 리턴
@@ -98,7 +100,9 @@ except Exception:
                 "role": "tool",
                 "content": f"[router] dummy route → info_extractor (user_input='{ui[:30]}')",
                 "created_at": _now_iso(),
-                "meta": {},
+                    "meta": {
+        "no_store": True,  
+    },
             }],
         }
 
@@ -128,7 +132,9 @@ except Exception:
                 "role": "tool",
                 "content": "[info_extractor] dummy updated profile/collection",
                 "created_at": _now_iso(),
-                "meta": {},
+                    "meta": {
+        "no_store": True,  
+    },
             }],
         }
 
@@ -157,7 +163,9 @@ except Exception as e:
                 "role": "tool",
                 "content": "[retrieval_planner] dummy 1 snippet",
                 "created_at": _now_iso(),
-                "meta": {},
+                    "meta": {
+        "no_store": True,  
+    },
             }],
         }
 
@@ -197,7 +205,9 @@ except Exception as e:
                 "role": "assistant",
                 "content": ans,
                 "created_at": _now_iso(),
-                "meta": {},
+                    "meta": {
+        "no_store": True,  
+    },
             }],
         }
 
@@ -212,7 +222,9 @@ except Exception:
             "role": "tool",
             "content": "[persist_pipeline] dummy; no DB upsert",
             "created_at": _now_iso(),
-            "meta": {},
+                "meta": {
+        "no_store": True,  
+    },
         }
         # counts.messages는 state에 현재까지 쌓인 messages 길이를 쓰는 게 자연스럽기 때문에
         messages_len = len(state.get("messages") or [])

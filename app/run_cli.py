@@ -290,7 +290,9 @@ def run_cli() -> None:
                 "role": "user",
                 "content": user_text,
                 "created_at": _now_iso(),
-                "meta": {},
+                    "meta": {
+        "no_store": True,  
+    },
             })
             state["messages"] = messages
 
