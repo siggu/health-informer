@@ -105,11 +105,7 @@ class BackendService:
         """회원가입 API를 호출합니다."""
         url = f"{FASTAPI_BASE_URL}/api/v1/user/register"
 
-<<<<<<< HEAD
         # 11.18 수정: 빈 문자열 값을 None으로 변환하여 백엔드로 전송
-=======
-         # 11.18 수정: 빈 문자열 값을 None으로 변환하여 백엔드로 전송
->>>>>>> 3aea1edcad767d31f81424038b9cade9b283aeee
         # 이렇게 해야 DB에 NULL로 저장되어 의도치 않은 기본값 설정을 방지할 수 있습니다.
         payload = {}
         for key, value in user_data.items():
@@ -126,10 +122,6 @@ class BackendService:
         else:
             payload["median_income_ratio"] = user_data.get("median_income_ratio")
         # ===========================================================================
-<<<<<<< HEAD
-=======
-
->>>>>>> 3aea1edcad767d31f81424038b9cade9b283aeee
         try:
             response = requests.post(url, json=payload, timeout=10)
             if response.status_code == 201:
