@@ -67,7 +67,9 @@ except Exception:
             "role": "tool",
             "content": "[session_orchestrator] dummy node executed",
             "created_at": _now_iso(),
-            "meta": {},
+                "meta": {
+        "no_store": True,  
+    },
         }
         return {
             # ★ messages 전체 대신, 이번에 추가할 메시지만 리턴
@@ -98,7 +100,9 @@ except Exception:
                 "role": "tool",
                 "content": f"[router] dummy route → info_extractor (user_input='{ui[:30]}')",
                 "created_at": _now_iso(),
-                "meta": {},
+                    "meta": {
+        "no_store": True,  
+    },
             }],
         }
 
@@ -128,7 +132,9 @@ except Exception:
                 "role": "tool",
                 "content": "[info_extractor] dummy updated profile/collection",
                 "created_at": _now_iso(),
-                "meta": {},
+                    "meta": {
+        "no_store": True,  
+    },
             }],
         }
 
@@ -151,7 +157,9 @@ except Exception as e:
                 "role": "tool",
                 "content": "[user_context_node] dummy pass-through",
                 "created_at": _now_iso(),
-                "meta": {},
+                    "meta": {
+        "no_store": True,  
+    },
             }],
         }
 
@@ -180,7 +188,9 @@ except Exception as e:
                 "role": "tool",
                 "content": "[policy_retriever_node] dummy 1 snippet",
                 "created_at": _now_iso(),
-                "meta": {},
+                    "meta": {
+        "no_store": True,  
+    },
             }],
         }
 
@@ -198,7 +208,7 @@ except Exception:
                 "role": "assistant",
                 "content": ans,
                 "created_at": _now_iso(),
-                "meta": {},
+                    "meta": {},
             }],
         }
 
@@ -212,7 +222,9 @@ except Exception:
             "role": "tool",
             "content": "[persist_pipeline] dummy; no DB upsert",
             "created_at": _now_iso(),
-            "meta": {},
+                "meta": {
+        "no_store": True,  
+    },
         }
         # counts.messages는 state에 현재까지 쌓인 messages 길이를 쓰는 게 자연스럽기 때문에
         messages_len = len(state.get("messages") or [])
@@ -335,9 +347,9 @@ if __name__ == "__main__":
     out2 = app.invoke({
         "session_id": "sess-001",
         "profile_id": 76,
-        "user_input": "저는 췌장암이 있고 현재 항암치료중입니다.",
+        "user_input": "저는 췌장암이 있고 현재 항암치료중입니다. 제가 받을 수 있는 혜택이 궁금해요",
         "rolling_summary": out.get("rolling_summary"),
-        "end_session": True,
+        "end_session": False,
     }, config=cfg)
     print("answer2:", out2.get("answer"))
     print("messages_count:", len(out2.get("messages", [])))
