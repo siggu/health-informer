@@ -1,5 +1,5 @@
 """채팅 렌더링/메시지 전송/정책 카드 파싱"""
-
+# app/frontend/src/pages/chat.py
 import uuid
 import time
 import streamlit as st
@@ -50,24 +50,32 @@ def handle_send_message(message: str):
 
     try:
         with st.spinner("답변 생성중..."):
-            placeholder = st.empty()
-            collected = ""
-            for delta in backend_service.get_llm_response_stream(
-                history_messages=st.session_state.get("messages", []),
-                user_message=message,
-                active_profile=active_profile,
-            ):
-                collected += delta
-                placeholder.markdown(collected)
+            # 스트리밍 대신 단일 응답 호출로 변경
+            token = _get_auth_token()  # 인증 토큰 가져오기
+            response = backend_service.send_chat_message(
+                session_id=st.session_state.get("session_id"),  # 세션 ID 전달
+                token=token,  # 인증 토큰 전달
+                user_input=message,
+            )
+
+            # 응답 처리
+            answer = response.get("answer", "응답을 받지 못했습니다.")
+            st.session_state["session_id"] = response.get(
+                "session_id"
+            )  # 세션 ID 업데이트
+
+            # 디버그 정보 저장 (선택 사항)
+            if "debug" in response:
+                st.session_state["last_debug"] = response["debug"]
 
         assistant_message = {
             "id": str(uuid.uuid4()),
             "role": "assistant",
-            "content": collected or "응답을 받았습니다.",
+            "content": answer,
             "timestamp": time.time(),
         }
 
-        policies = _extract_policies_from_text(collected)
+        policies = _extract_policies_from_text(answer)
         if policies:
             assistant_message["policies"] = policies
 

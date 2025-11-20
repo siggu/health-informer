@@ -1,19 +1,42 @@
 # app/api/v1/chat.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 from typing import Optional, Dict, Any, List
 from uuid import uuid4
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-# LangGraph 엔진
 from app.agents.new_pipeline import build_graph
 
-# LangGraph Runnable 로드 (초기 1회)
-graph_app = build_graph()
-
 router = APIRouter()
+
+# ⭐ 전역 캐시 (싱글톤 패턴)
+_graph_app = None
+_graph_init_error = None  # 초기화 에러 저장
+
+
+def get_graph_app():
+    """LangGraph 인스턴스를 lazy하게 로드 (첫 호출 시 1회만 생성)"""
+    global _graph_app, _graph_init_error
+
+    # 이미 초기화 실패한 경우 즉시 에러
+    if _graph_init_error:
+        raise _graph_init_error
+
+    if _graph_app is None:
+        try:
+            print("🔧 [INFO] LangGraph 워크플로우 초기화 중...")
+            _graph_app = build_graph()
+            print("✅ [INFO] LangGraph 초기화 완료")
+        except Exception as e:
+            _graph_init_error = HTTPException(
+                status_code=503, detail=f"LangGraph 초기화 실패: {str(e)}"
+            )
+            print(f"🔥 [ERROR] LangGraph 초기화 실패: {e}")
+            raise _graph_init_error
+
+    return _graph_app
+
 
 # ─────────────────────────────────────
 # Request / Response Models
@@ -23,7 +46,7 @@ router = APIRouter()
 class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     user_input: str
-    user_action: str = "none"  # none | save | reset_save | reset_drop
+    user_action: str = "none"
     client_meta: Dict[str, Any] = {}
 
 
@@ -46,6 +69,12 @@ class ChatResponse(BaseModel):
 # ─────────────────────────────────────
 @router.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest) -> ChatResponse:
+    """
+    채팅 메시지를 처리하고 응답을 반환합니다.
+
+    첫 호출 시 LangGraph 워크플로우를 초기화합니다 (약 1-2초 소요).
+    이후 호출은 캐시된 인스턴스를 사용하여 즉시 처리됩니다.
+    """
     # A) 세션 ID 생성/유지
     session_id = req.session_id or f"sess-{uuid4().hex}"
 
@@ -62,7 +91,13 @@ async def chat(req: ChatRequest) -> ChatResponse:
     # C) 세션 기반 체크포인트 사용
     config = {"configurable": {"thread_id": session_id}}
 
-    # D) LangGraph 실행
+    # ⭐ D) LangGraph 실행 (lazy loading)
+    try:
+        graph_app = get_graph_app()
+    except HTTPException as e:
+        # 초기화 실패 시 사용자에게 명확한 에러 메시지
+        raise e
+
     out_state: Dict[str, Any] = graph_app.invoke(init_state, config=config)
 
     # ─────────────────────────────────────
@@ -97,13 +132,15 @@ async def chat(req: ChatRequest) -> ChatResponse:
     retrieval = out_state.get("retrieval") or {}
     rag_snippets = retrieval.get("rag_snippets") or []
 
-    # router_decision (UI friendly)
-    if req.user_action == "save":
-        router_decision = "save"
-    elif req.user_action in ("reset_save", "reset_drop"):
-        router_decision = req.user_action
-    else:
-        router_decision = "normal"
+    router_decision = (
+        "save"
+        if req.user_action == "save"
+        else (
+            req.user_action
+            if req.user_action in ("reset_save", "reset_drop")
+            else "normal"
+        )
+    )
 
     used_rag = retrieval.get("used_rag")
 

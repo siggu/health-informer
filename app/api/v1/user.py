@@ -1,8 +1,9 @@
 """User & Auth 관련 API 엔드포인트 -11.18(리프레시 토큰 수정, 프로필 필드명 변환 적용)"""
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from datetime import datetime, timezone
-from typing import List, Any
+
+# from datetime import datetime, timezone
+from typing import Any
 from passlib.context import CryptContext
 
 from app.db.database import get_db
@@ -131,6 +132,26 @@ async def login_user(user_data: UserLogin, db: Any = Depends(get_db)):
         token_type="bearer",
         refresh_token=refresh_token,
     )
+
+
+@router.get(
+    "/check-id/{username}", response_model=SuccessResponse, summary="아이디 중복 확인"
+)
+async def check_id_availability(username: str, db: Any = Depends(get_db)):
+    """
+    주어진 아이디(username)가 이미 데이터베이스에 존재하는지 확인합니다.
+    """
+    if not username or len(username) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="아이디는 2자 이상이어야 합니다.",
+        )
+    if db_ops.check_user_exists(username):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="이미 사용 중인 아이디입니다.",
+        )
+    return SuccessResponse(message="사용 가능한 아이디입니다.")
 
 
 # ===============================================

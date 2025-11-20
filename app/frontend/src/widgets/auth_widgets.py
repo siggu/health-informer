@@ -2,11 +2,7 @@
 
 import streamlit as st
 import datetime
-from app.stream_app.src.backend_service import (
-    api_signup,
-    api_check_id_availability,
-    api_get_user_info,
-)
+from src.backend_service import backend_service
 from src.utils.session_manager import save_session
 
 # 옵션 데이터
@@ -85,13 +81,14 @@ def render_login_tab():
             ] = "아이디와 비밀번호를 입력해주세요."
             st.rerun()
 
-        success, message = api_login(data["userId"], data["password"])
+        success, message = backend_service.login_user(data["userId"], data["password"])
         if success:
             st.session_state["is_logged_in"] = True
             st.session_state["show_login_modal"] = False
             st.session_state["auth_error"]["login"] = ""
             # 사용자 정보/프로필 불러오기
-            ok, user_info = api_get_user_info(data["userId"])
+            token = message.get("access_token")  # 로그인 성공 시 반환된 토큰 사용
+            ok, user_info = backend_service.get_user_profile(token)
             if ok:
                 st.session_state["user_info"] = user_info
                 # profiles.json 스키마를 Streamlit 내부 프로필 리스트로 매핑
@@ -121,7 +118,10 @@ def render_login_tab():
             # 로그인 세션 저장 (user_info 포함)
             save_session(
                 data["userId"],
-                st.session_state.get("user_info", {"userId": data["userId"]}),
+                {
+                    "auth_token": token,
+                    **st.session_state.get("user_info", {"userId": data["userId"]}),
+                },
             )
         else:
             st.session_state["auth_error"]["login"] = message
@@ -134,7 +134,7 @@ def handle_signup_submit(signup_data):
         return False, "필수 정보를 입력해주세요."
 
     # 회원가입 API 호출
-    success, message = api_signup(signup_data["userId"], signup_data)
+    success, message = backend_service.register_user(signup_data)
 
     if success:
         # 회원가입 성공 시 사용자 정보 저장
@@ -175,7 +175,9 @@ def render_signup_tab():
         st.markdown("<br>", unsafe_allow_html=True)  # 버튼 정렬을 위한 공백
         if st.button("중복 확인", key="btn_check_id", use_container_width=True):
             if user_id:
-                is_available, msg = api_check_id_availability(user_id)
+                is_available, msg = backend_service.check_id_availability(
+                    user_id
+                )  # 이 함수는 backend_service에 추가 필요
                 if is_available:
                     st.session_state["is_id_available"] = True
                     st.success(msg)

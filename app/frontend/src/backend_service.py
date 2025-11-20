@@ -43,16 +43,15 @@ class BackendService:
     def send_chat_message(
         self,
         session_id: Optional[str],
-        token: str,  # 인증 토큰 추가
         user_input: str,
+        token: Optional[str] = None,  # 인증 토큰 추가 (선택 사항으로 변경)
         user_action: str = "none",
     ) -> Dict[str, Any]:
         """
         새로운 통합 /api/chat 엔드포인트로 채팅 메시지를 전송합니다.
-        이제 인증 토큰이 필요합니다.
         스트리밍을 사용하지 않고 전체 응답을 한 번에 받습니다.
         """
-        url = f"{FASTAPI_BASE_URL}/api/chat"
+        url = f"{FASTAPI_BASE_URL}/api/v1/chat" # API 경로 수정
         payload = {
             "session_id": session_id,
             "user_input": user_input,
@@ -62,10 +61,13 @@ class BackendService:
                 "app_version": "streamlit-v1"
             }
         }
-        headers = {"Authorization": f"Bearer {token}"}
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
 
         try:
-            response = requests.post(url, json=payload, headers=headers, timeout=60)
+            # 백엔드 API가 인증을 요구하므로 헤더를 포함하여 요청
+            response = requests.post(url, json=payload, headers=headers, timeout=120)
             response.raise_for_status()
             return response.json()  # ChatResponse 모델에 맞는 dict 반환
         except requests.exceptions.RequestException as e:
@@ -129,6 +131,23 @@ class BackendService:
                 )  # {"access_token": "...", "token_type": "bearer"}
             else:
                 error_detail = response.json().get("detail", "로그인 실패")
+                return False, error_detail
+        except requests.exceptions.RequestException as e:
+            return False, f"백엔드 연결 실패: {e}"
+
+    def check_id_availability(self, username: str) -> Tuple[bool, str]:
+        """아이디 사용 가능 여부를 확인하는 API를 호출합니다."""
+        if not username:
+            return False, "아이디를 입력해주세요."
+
+        url = f"{FASTAPI_BASE_URL}/api/v1/user/check-id/{username}"
+        try:
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                return True, response.json().get("message", "사용 가능한 아이디입니다.")
+            else:
+                # 409 Conflict (이미 존재) 또는 다른 오류
+                error_detail = response.json().get("detail", "이미 사용 중인 아이디입니다.")
                 return False, error_detail
         except requests.exceptions.RequestException as e:
             return False, f"백엔드 연결 실패: {e}"

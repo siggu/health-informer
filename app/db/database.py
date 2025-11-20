@@ -10,7 +10,7 @@ import logging
 # import datetime
 from contextlib import contextmanager
 from dotenv import load_dotenv
-
+from urllib.parse import urlparse
 
 # .env 파일에서 환경 변수 로드
 load_dotenv()
@@ -18,13 +18,28 @@ load_dotenv()
 # 로깅 설정
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# 환경 변수에서 DB 연결 정보 로드
-DB_NAME = os.getenv("DB_NAME")
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT")
+if DATABASE_URL:
+    # asyncpg 프로토콜 제거 (psycopg2는 postgresql:// 사용)
+    db_url = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+    parsed = urlparse(db_url)
+    
+    DB_NAME = parsed.path[1:]  # '/team02' -> 'team02'
+    DB_USER = parsed.username
+    DB_PASSWORD = parsed.password
+    DB_HOST = parsed.hostname
+    DB_PORT = parsed.port
+else:
+    # ⚠️ 폴백: 개별 환경변수 사용
+    DB_NAME = os.getenv("DB_NAME")
+    DB_USER = os.getenv("DB_USER")
+    DB_PASSWORD = os.getenv("DB_PASSWORD")
+    DB_HOST = os.getenv("DB_HOST")
+    DB_PORT = os.getenv("DB_PORT")
+
+# 디버깅 로그
+logger.info(f"🔗 DB 연결 설정: {DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
 
 # 매핑 딕셔너리
 GENDER_MAPPING = {
